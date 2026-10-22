@@ -38,7 +38,6 @@ SUPPORTED_SCHEMES = (
     "hysteria2", "hy2", "tuic", "socks5", "http", "https"
 )
 
-# Хорошие SNI для белых списков (приоритет у российских)
 GOOD_SNI = {
     "vk.com", "www.vk.com", "m.vk.com",
     "yandex.ru", "ya.ru", "www.yandex.ru",
@@ -100,7 +99,6 @@ COUNTRY_MAP = {
 }
 
 
-# ====================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ======================
 def fetch_url(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=45) as response:
@@ -183,7 +181,6 @@ def detect_country(proxy_line: str) -> str:
 
 
 def parse_vless_params(proxy_line: str) -> dict:
-    """Достаём security, sni и другие параметры из VLESS-ссылки"""
     result = {"security": "", "sni": "", "is_reality": False}
     try:
         if not proxy_line.lower().startswith("vless://"):
@@ -287,7 +284,6 @@ async def check_proxy(proxy_line: str, sem: asyncio.Semaphore) -> dict | None:
             return None
 
 
-# ====================== ФИЛЬТРАЦИЯ ======================
 def smart_filter(
     items: list[dict],
     max_per_country: int = MAX_PER_COUNTRY,
@@ -319,11 +315,6 @@ def smart_filter(
 
 
 def smart_filter_white(items: list[dict]) -> list[dict]:
-    """
-    White list:
-    - Только VLESS
-    - Приоритет: Reality + хороший/российский SNI
-    """
     vless_items = [i for i in items if i["scheme"] == "vless"]
 
     def priority(item: dict) -> tuple:
@@ -358,14 +349,12 @@ def smart_filter_white(items: list[dict]) -> list[dict]:
     return result
 
 
-# ====================== ЗАПИСЬ ======================
 def write_list(path: Path, items: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [item["proxy"] for item in items]
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
-# ====================== MAIN ======================
 async def main_async() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     by_proto_dir = OUT_DIR / "by_protocol"
@@ -381,7 +370,6 @@ async def main_async() -> int:
         print(f"ОШИБКА скачивания: {e}")
         return 1
 
-    # Пробуем base64
     try:
         cleaned = text.strip().replace("\n", "").replace("\r", "")
         cleaned += "=" * ((4 - len(cleaned) % 4) % 4)
@@ -427,18 +415,15 @@ async def main_async() -> int:
         print("Нет рабочих серверов")
         return 0
 
-    # ===== Основной список =====
     main_list = smart_filter(working)
     write_list(OUT_DIR / "all.txt", main_list)
     write_list(OUT_DIR / "working_proxies.txt", main_list)
     print(f"Основной список: {len(main_list)}")
 
-    # ===== White list (VLESS Reality приоритет) =====
     white_list = smart_filter_white(working)
     write_list(OUT_DIR / "white_checked.txt", white_list)
     print(f"White list (VLESS приоритет Reality + SNI): {len(white_list)}")
 
-    # ===== По протоколам =====
     by_scheme: dict[str, list[dict]] = defaultdict(list)
     for item in working:
         by_scheme[item["scheme"]].append(item)
@@ -446,180 +431,6 @@ async def main_async() -> int:
     for scheme, items in by_scheme.items():
         filtered = smart_filter(items)
         write_list(by_proto_dir / f"{scheme}.txt", filtered)
-        write_list(OUT_DIR / f"{scheme}.txt", filtered)
-        if filtered:
-            print(f"  {scheme}.txt → {len(filtered)}")
-
-    print("Готово.")
-    return 0
-
-
-def main():
-    return asyncio.run(main_async())
-
-
-if __name__ == "__main__":
-    sys.exit(main())bda x: x["latency_ms"])
-    seen_ips: set[str] = set()
-    country_counts: dict[str, int] = defaultdict(int)
-    result: list[dict] = []
-
-    for item in items:
-        if len(result) >= max_total:
-            break
-        ip = item["ip"]
-        country = item["country"]
-
-        if unique_ip and ip and ip in seen_ips:
-            continue
-        if country_counts[country] >= max_per_country:
-            continue
-
-        if unique_ip and ip:
-            seen_ips.add(ip)
-        country_counts[country] += 1
-        result.append(item)
-
-    return result
-
-
-def smart_filter_white(items: list[dict]) -> list[dict]:
-    """
-    White list:
-    - Только VLESS
-    - Приоритет: Reality + хороший/российский SNI
-    - Потом обычный Reality
-    - Обычный VLESS (без Reality) — в самый конец (можно отключить)
-    """
-    # Оставляем только VLESS
-    vless_items = [i for i in items if i["scheme"] == "vless"]
-
-    def priority(item: dict) -> tuple:
-        is_reality = 0 if item.get("is_reality") else 1
-        sni = (item.get("sni") or "").lower()
-        has_good_sni = 0 if sni in GOOD_SNI else 1
-        # Российские SNI ещё выше
-        is_ru_sni = 0 if any(x in sni for x in ("vk.com", "yandex", "ya.ru", "mail.ru", "ok.ru", "userapi")) else 1
-        return (is_reality, is_ru_sni, has_good_sni, item["latency_ms"])
-
-    vless_items.sort(key=priority)
-
-    ip_counts: dict[str, int] = defaultdict(int)
-    country_counts: dict[str, int] = defaultdict(int)
-    result: list[dict] = []
-
-    for item in vless_items:
-        if len(result) >= WHITE_MAX_TOTAL:
-            break
-
-        # Можно раскомментировать, если хочешь ТОЛЬКО Reality:
-        # if not item.get("is_reality"):
-        #     continue
-
-        ip = item["ip"]
-        country = item["country"]
-
-        if ip_counts[ip] >= WHITE_MAX_PER_IP:
-            continue
-        if country_counts[country] >= WHITE_MAX_PER_COUNTRY:
-            continue
-
-        ip_counts[ip] += 1
-        country_counts[country] += 1
-        result.append(item)
-
-    return result
-
-
-# ====================== ЗАПИСЬ ======================
-def write_list(path: Path, items: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [item["proxy"] for item in items]
-    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-
-
-# ====================== MAIN ======================
-async def main_async() -> int:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    by_proto_dir = OUT_DIR / "by_protocol"
-    by_proto_dir.mkdir(parents=True, exist_ok=True)
-
-    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}] Source: {SOURCE_URL}")
-    print(f"Timeout={TIMEOUT}s  Concurrency={CONCURRENCY}")
-
-    print("Скачивание списка...")
-    try:
-        text = await asyncio.to_thread(fetch_url, SOURCE_URL)
-    except Exception as e:
-        print(f"ОШИБКА скачивания: {e}")
-        return 1
-
-    # Пробуем base64
-    try:
-        cleaned = text.strip().replace("\n", "").replace("\r", "")
-        cleaned += "=" * ((4 - len(cleaned) % 4) % 4)
-        decoded = base64.b64decode(cleaned, validate=False)
-        decoded_text = decoded.decode("utf-8", errors="ignore")
-        if "://" in decoded_text:
-            text = decoded_text
-            print("Подписка декодирована из base64")
-    except Exception:
-        pass
-
-    seen: set[str] = set()
-    configs: list[str] = []
-    for line in text.splitlines():
-        p = parse_line(line)
-        if p and p not in seen:
-            seen.add(p)
-            configs.append(p)
-
-    print(f"Уникальных конфигов: {len(configs)}")
-    if not configs:
-        print("Список пуст")
-        return 0
-
-    print("Запуск проверки...")
-    sem = asyncio.Semaphore(CONCURRENCY)
-    tasks = [check_proxy(cfg, sem) for cfg in configs]
-
-    working: list[dict] = []
-    chunk_size = 300
-    for i in range(0, len(tasks), chunk_size):
-        chunk = tasks[i:i + chunk_size]
-        results = await asyncio.gather(*chunk)
-        for res in results:
-            if res:
-                working.append(res)
-        print(f"  проверено {min(i + chunk_size, len(tasks))}/{len(tasks)} | живых: {len(working)}")
-
-    working.sort(key=lambda x: x["latency_ms"])
-    print(f"Всего рабочих: {len(working)}")
-
-    if not working:
-        print("Нет рабочих серверов")
-        return 0
-
-    # ===== Основной список =====
-    main_list = smart_filter(working)
-    write_list(OUT_DIR / "all.txt", main_list)
-    write_list(OUT_DIR / "working_proxies.txt", main_list)
-    print(f"Основной список: {len(main_list)}")
-
-    # ===== White list (VLESS Reality приоритет) =====
-    white_list = smart_filter_white(working)
-    write_list(OUT_DIR / "white_checked.txt", white_list)
-    print(f"White list (VLESS приоритет Reality + SNI): {len(white_list)}")
-
-    # ===== По протоколам =====
-    by_scheme: dict[str, list[dict]] = defaultdict(list)
-    for item in working:
-        by_scheme[item["scheme"]].append(item)
-
-    for scheme, items in by_scheme.items():
-        filtered = smart_filter(items)
-        write_list(by_proto_dir / f"{scheme}.txt", filtered)
-        # Также в корень для совместимости
         write_list(OUT_DIR / f"{scheme}.txt", filtered)
         if filtered:
             print(f"  {scheme}.txt → {len(filtered)}")
