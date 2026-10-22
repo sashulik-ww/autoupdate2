@@ -38,10 +38,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Убираем мусор, который ломает rebase
-          git clean -fd
-          git checkout -- . 2>/dev/null || true
-
           git add results/
           if git diff --cached --quiet; then
             echo "Нет изменений"
@@ -50,7 +46,6 @@ jobs:
 
           git commit -m "Update proxies: $(date -u +'%Y-%m-%d %H:%M') UTC"
 
-          # Несколько попыток на случай гонки
           for i in 1 2 3 4 5; do
             echo "Попытка пуша №$i..."
             git fetch origin main
