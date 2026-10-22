@@ -4,72 +4,167 @@ import asyncio
 import base64
 import json
 import os
+import re
+import socket
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 SOURCE_URL = os.getenv(
     "SOURCE_URL",
     "https://raw.githubusercontent.com/nikita29a/FreeProxyList/refs/heads/main/mirror/1.txt",
 )
-TIMEOUT = float(os.getenv("TIMEOUT", "5"))  # Таймаут на TCP-соединение
-REQUIRE_SPB = os.getenv("REQUIRE_SPB", "true").lower() == "true"
+TIMEOUT = float(os.getenv("TIMEOUT", "5"))
+REQUIRE_SPB = os.getenv("REQUIRE_SPB", "false").lower() == "true"
 OUT_DIR = Path(os.getenv("OUT_DIR", "results"))
 
 GEO_URL = "http://ip-api.com/json/?fields=status,message,countryCode,regionName,city,query"
 
-# Поддерживаемые протоколы для v2rayNG
 SUPPORTED_SCHEMES = ("vless", "vmess", "trojan", "ss", "ssr", "hysteria2", "hy2", "tuic", "socks5", "http", "https")
+
+# Красивые названия и флаги стран
+COUNTRY_DATA = {
+    "DE": ("Germany", "🇩🇪"),
+    "NL": ("Netherlands", "🇳🇱"),
+    "US": ("United States", "🇺🇸"),
+    "FR": ("France", "🇫🇷"),
+    "GB": ("United Kingdom", "🇬🇧"),
+    "SG": ("Singapore", "🇸🇬"),
+    "CA": ("Canada", "🇨🇦"),
+    "JP": ("Japan", "🇯🇵"),
+    "FI": ("Finland", "🇫🇮"),
+    "PL": ("Poland", "🇵🇱"),
+    "RU": ("Russia", "🇷🇺"),
+    "TR": ("Turkey", "🇹🇷"),
+    "KZ": ("Kazakhstan", "🇰🇿"),
+    "SE": ("Sweden", "🇸🇪"),
+    "CH": ("Switzerland", "🇨🇭"),
+    "IT": ("Italy", "🇮🇹"),
+    "ES": ("Spain", "🇪🇸"),
+    "UNKNOWN": ("Server", "🌐")
+}
+
+COUNTRY_MAP = {
+    "germany": "DE", "deutschland": "DE", "германия": "DE",
+    "netherlands": "NL", "nederland": "NL", "нидерланды": "NL", "голландия": "NL",
+    "united states": "US", "usa": "US", "america": "US", "сша": "US",
+    "france": "FR", "франция": "FR",
+    "united kingdom": "GB", "uk": "GB", "britain": "GB", "великобритания": "GB", "англия": "GB",
+    "singapore": "SG", "сингапур": "SG",
+    "canada": "CA", "канада": "CA",
+    "japan": "JP", "япония": "JP",
+    "finland": "FI", "финляндия": "FI",
+    "poland": "PL", "польша": "PL",
+    "russia": "RU", "россия": "RU",
+    "turkey": "TR", "турция": "TR",
+    "kazakhstan": "KZ", "казахстан": "KZ",
+    "sweden": "SE", "швеция": "SE",
+    "switzerland": "CH", "швейцария": "CH",
+    "italy": "IT", "италия": "IT",
+    "spain": "ES", "испания": "ES",
+}
 
 
 def parse_line(line: str) -> str | None:
-    """
-    Парсит строку. Поддерживает как ссылки вида vless://, trojan://, так и старые http://.
-    Возвращает чистую оригинальную строку конфига или None, если формат неверный.
-    """
     line = line.strip()
     if not line or line.startswith("#"):
         return None
-    
-    # Проверяем, есть ли разделитель схемы (://)
     if "://" not in line:
         return None
-    
     scheme = line.split("://")[0].lower()
-    if scheme in SUPPORTED_SCHEMES:
-        return line
-    return None
+    return line if scheme in SUPPORTED_SCHEMES else None
 
 
-def is_spb(geo: dict) -> bool:
-    place = f"{geo.get('city', '')} {geo.get('regionName', '')}".lower()
-    return geo.get("countryCode") == "RU" and "petersburg" in place
+def extract_host_port(proxy_line: str) -> tuple[str | None, int]:
+    scheme = proxy_line.split("://")[0].lower()
+    if scheme == "vmess":
+        try:
+            payload = proxy_line.split("://", 1)[1].strip()
+            payload += "=" * ((4 - len(payload) % 4) % 4)
+            decoded = base64.b64decode(payload).decode("utf-8", errors="ignore")
+            data = json.loads(decoded)
+            host = data.get("add")
+            port = int(data.get("port", 443))
+            if host:
+                return host, port
+        except Exception:
+            pass
 
-
-async def check_tcp_port(proxy_line: str) -> dict | None:
-    """
-    Быстрая и надежная проверка доступности хоста и порта через TCP-сокет.
-    Это универсальный метод, который работает для vless, trojan, vmess и т.д.,
-    не требуя поднятия тяжелого туннеля на каждый узел.
-    """
     try:
-        # Извлекаем хост и порт из строки конфига
-        # Для ссылок вида protocol://user@host:port/path...
         parts = urlsplit(proxy_line)
         host = parts.hostname
         port = parts.port
-        
-        if not host:
+        if host:
+            if not port:
+                port = 443 if scheme in ("vless", "trojan", "hysteria2", "hy2", "https", "tuic") else 80
+            return host, port
+    except Exception:
+        pass
+    return None, 0
+
+
+async def resolve_to_ip(host: str) -> str:
+    if not host:
+        return ""
+    try:
+        socket.inet_aton(host)
+        return host
+    except socket.error:
+        try:
+            loop = asyncio.get_running_loop()
+            info = await loop.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+            if info:
+                return info[0][4][0]
+        except Exception:
+            pass
+    return host
+
+
+def detect_country(proxy_line: str) -> str:
+    text_lower = proxy_line.lower()
+    match = re.search(r'[#\[\-_/\s]([a-z]{2})[#\]\-_/\s]', text_lower)
+    if match:
+        code = match.group(1).upper()
+        if code in COUNTRY_DATA or len(code) == 2:
+            return code
+    for name, code in COUNTRY_MAP.items():
+        if name in text_lower:
+            return code
+    return "UNKNOWN"
+
+
+def format_clean_proxy(proxy_line: str, country_code: str) -> str:
+    info = COUNTRY_DATA.get(country_code, COUNTRY_DATA["UNKNOWN"])
+    clean_name = f"{info[1]} {info[0]}"
+    scheme = proxy_line.split("://")[0].lower()
+    
+    if scheme == "vmess":
+        try:
+            prefix, payload = proxy_line.split("://", 1)
+            payload_clean = payload.strip().split("#")[0]
+            payload_padded = payload_clean + "=" * ((4 - len(payload_clean) % 4) % 4)
+            decoded = base64.b64decode(payload_padded).decode("utf-8", errors="ignore")
+            data = json.loads(decoded)
+            data["ps"] = clean_name
+            new_json = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
+            new_payload = base64.b64encode(new_json.encode("utf-8")).decode("utf-8")
+            return f"{prefix}://{new_payload}"
+        except Exception:
+            return proxy_line
+    else:
+        base_part = proxy_line.split("#", 1)[0]
+        return f"{base_part}#{quote(clean_name)}"
+
+
+async def check_proxy(proxy_line: str) -> dict | None:
+    try:
+        host, port = extract_host_port(proxy_line)
+        if not host or not port:
             return None
-        if not port:
-            # Дефолтные порты для защищенных протоколов
-            port = 443 if parts.scheme in ("vless", "trojan", "hysteria2", "hy2", "https") else 80
 
         started = time.monotonic()
-        
-        # Асинхронное открытие TCP-соединения
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(host, port),
             timeout=TIMEOUT
@@ -78,12 +173,71 @@ async def check_tcp_port(proxy_line: str) -> dict | None:
         await writer.wait_closed()
         
         latency = int((time.monotonic() - started) * 1000)
+        resolved_ip = await resolve_to_ip(host)
+        country = detect_country(proxy_line)
+        cleaned_proxy = format_clean_proxy(proxy_line, country)
+
         return {
-            "proxy": proxy_line,
+            "proxy": cleaned_proxy,
+            "ip": resolved_ip,
+            "country": country,
             "latency_ms": latency,
         }
     except Exception:
         return None
+
+
+def smart_filter(working_list: list[dict], max_per_country: int = 4, max_total: int = 250) -> list[str]:
+    seen_ips = set()
+    country_counts = {}
+    filtered_proxies = []
+
+    for item in working_list:
+        if len(filtered_proxies) >= max_total:
+            break
+        ip = item["ip"]
+        proxy_line = item["proxy"]
+        country = item["country"]
+
+        if ip in seen_ips:
+            continue
+
+        count = country_counts.get(country, 0)
+        if count < max_per_country:
+            seen_ips.add(ip)
+            country_counts[country] = count + 1
+            filtered_proxies.append(proxy_line)
+
+    return filtered_proxies
+
+
+def smart_filter_white(working_list: list[dict], max_per_ip: int = 2, max_per_country: int = 5, max_total: int = 450) -> list[str]:
+    white_friendly_schemes = ("vless", "trojan", "hysteria2", "hy2", "vmess")
+    ip_counts = {}
+    country_counts = {}
+    filtered_proxies = []
+
+    for item in working_list:
+        if len(filtered_proxies) >= max_total:
+            break
+        proxy_line = item["proxy"]
+        scheme = proxy_line.split("://")[0].lower()
+        
+        if scheme not in white_friendly_schemes:
+            continue
+
+        ip = item["ip"]
+        country = item["country"]
+
+        ip_count = ip_counts.get(ip, 0)
+        country_count = country_counts.get(country, 0)
+
+        if ip_count < max_per_ip and country_count < max_per_country:
+            ip_counts[ip] = ip_count + 1
+            country_counts[country] = country_count + 1
+            filtered_proxies.append(proxy_line)
+
+    return filtered_proxies
 
 
 async def main() -> int:
@@ -91,88 +245,25 @@ async def main() -> int:
 
     import aiohttp
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-        # 1. Проверка геолокации runner-а
-        try:
-            async with session.get(GEO_URL) as r:
-                geo = await r.json(content_type=None)
-        except Exception as e:
-            geo = {}
-            print(f"Не удалось определить геолокацию: {e}")
-        
-        print(f"Runner: {geo.get('query')} — {geo.get('city')}, {geo.get('regionName')}, {geo.get('countryCode')}")
-        if REQUIRE_SPB and not is_spb(geo):
-            print("ОШИБКА: runner не в Санкт-Петербурге, проверка не имеет смысла. "
-                  "Поставь REQUIRE_SPB=false в check.yml, чтобы отключить эту защиту.")
-            return 2
-
-        # 2. Загружаем список из источника
         try:
             async with session.get(SOURCE_URL) as r:
                 r.raise_for_status()
                 text = await r.text()
         except Exception as e:
-            print(f"ОШИБКА: не удалось скачать список: {e}")
+            print(f"ОШИБКА скачивания: {e}")
             return 1
 
-    # Если файл зашифрован в Base64 (стандарт для некоторых подписок)
     try:
-        decoded_bytes = base64.b64decode(text.strip(), validate=True)
+        cleaned_text = text.strip()
+        cleaned_text += "=" * ((4 - len(cleaned_text) % 4) % 4)
+        decoded_bytes = base64.b64decode(cleaned_text, validate=True)
         text = decoded_bytes.decode("utf-8", errors="ignore")
     except Exception:
-        pass   # Значит, это обычный текст со списком строк
+        pass
 
-    # 3. Парсим и убираем дубликаты
-    seen: set[str] = set()
+    seen_configs: set[str] = set()
     configs = []
     for line in text.splitlines():
         parsed = parse_line(line)
-        if parsed and parsed not in seen:
-            seen.add(parsed)
-            configs.append(parsed)
-            
-    print(f"В исходном списке найдено {len(configs)} уникальных конфигураций для v2rayNG.")
-
-    # 4. Проверяем доступность серверов параллельно
-    print(f"Запуск проверки (таймаут: {TIMEOUT}с)...")
-    tasks = [check_tcp_port(cfg) for cfg in configs]
-    working = []
-    
-    # Выполняем пачками, чтобы не перегружать сеть
-    chunk_size = 100
-    for i in range(0, len(tasks), chunk_size):
-        chunk = tasks[i:i + chunk_size]
-        results = await asyncio.gather(*chunk)
-        for res in results:
-            if res:
-                working.append(res)
-        print(f"  проверено {min(i + chunk_size, len(tasks))}/{len(tasks)}, рабочих: {len(working)}")
-
-    # Сортируем по отклику (пинг)
-    working.sort(key=lambda r: r["latency_ms"])
-    print(f"Готово: рабочих конфигураций {len(working)} из {len(configs)}")
-
-    # 5. Сохраняем результаты в папку results/
-    (OUT_DIR / "working_proxies.txt").write_text(
-        "".join(r["proxy"] + "\n" for r in working), encoding="utf-8"
-    )
-    
-    (OUT_DIR / "working_proxies.json").write_text(
-        json.dumps(
-            {
-                "checked_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                "runner": {k: geo.get(k) for k in ("query", "city", "regionName", "countryCode")},
-                "source": SOURCE_URL,
-                "total_checked": len(configs),
-                "working_count": len(working),
-                "proxies": working,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+        if parsed and parsed not in seen_configs:
+            seen_configs.add(parsed)
