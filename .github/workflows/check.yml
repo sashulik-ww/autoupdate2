@@ -2,8 +2,8 @@ name: Check proxies (SPb)
 
 on:
   schedule:
-    - cron: "0 * * * *"   # каждый час
-  workflow_dispatch:       # ручной запуск
+    - cron: "0 * * * *"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,7 +14,6 @@ concurrency:
 
 jobs:
   check:
-    # Runner, установленный на машине в Санкт-Петербурге, с лейблом "spb"
     runs-on: [self-hosted, spb]
     timeout-minutes: 30
     steps:
@@ -43,5 +42,3 @@ jobs:
             git commit -m "Update proxies: $(date -u +'%Y-%m-%d %H:%M') UTC"
             git push
           fi
-
-
