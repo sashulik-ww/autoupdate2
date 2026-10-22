@@ -119,7 +119,7 @@ async def main() -> int:
         decoded_bytes = base64.b64decode(text.strip(), validate=True)
         text = decoded_bytes.decode("utf-8", errors="ignore")
     except Exception:
-        pass  - # Значит, это обычный текст со списком строк
+        pass   # Значит, это обычный текст со списком строк
 
     # 3. Парсим и убираем дубликаты
     seen: set[str] = set()
