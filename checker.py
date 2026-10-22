@@ -407,7 +407,7 @@ async def main_async() -> int:
     configs: list[str] = []
     for line in text.splitlines():
         p = parse_line(line)
-        if p and p not in:
+        if p and p not in seen:
             seen.add(p)
             configs.append(p)
 
