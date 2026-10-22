@@ -23,8 +23,15 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/pip install -q -r requirements.txt
-  
-       - name: Commit results
+
+      - name: Check proxies
+        env:
+          REQUIRE_SPB: "false"
+          CONCURRENCY: "200"
+          TIMEOUT: "10"
+        run: .venv/bin/python checker.py
+
+      - name: Commit results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
