@@ -39,15 +39,18 @@ jobs:
           
       - name: Install sing-box
         run: |
-          SB_VERSION=$(curl -sL https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep -oP '"tag_name": "\K(v?[^"]+)(?=")' | head -1)
-          echo "sing-box $SB_VERSION"
-          # убрать ведущую v если есть
-          VER=${SB_VERSION#v}
-          wget -q "https://github.com/SagerNet/sing-box/releases/download/\( {SB_VERSION}/sing-box- \){VER}-linux-amd64.tar.gz" -O sb.tar.gz
+          set -e
+          SB_TAG=$(curl -sL https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep -oP '"tag_name": "\K[^"]+' | head -1)
+          echo "sing-box tag: $SB_TAG"
+          VER="${SB_TAG#v}"
+          URL="https://github.com/SagerNet/sing-box/releases/download/\( {SB_TAG}/sing-box- \){VER}-linux-amd64.tar.gz"
+          echo "Download: $URL"
+          wget -q --show-progress "$URL" -O sb.tar.gz
           tar -xzf sb.tar.gz
-          sudo mv sing-box-*/sing-box /usr/local/bin/sing-box
-          chmod +x /usr/local/bin/sing-box
+          sudo install -m 755 sing-box-*/sing-box /usr/local/bin/sing-box
+          rm -rf sb.tar.gz sing-box-*
           sing-box version
+   
           
       - name: Check proxies
         env:
