@@ -1,1 +1,2 @@
-vless://dc7b1d7a-23ae-436b-996d-23cbfbe8ab8d@207.246.104.91:32932?security=reality&sni=aws.amazon.com&type=xhttp&fp=chrome&pbk=i0EJqjDTrTlMqJJKaDmFr8E3lEI3H1VEC7qhwCEI5W8&sid=98a6439e#%F0%9F%8C%90%20Server
+vless://1b4b11d5-4c2d-4533-9a55-636757cdee94@195.211.98.43:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.cloudflare.com&fp=chrome&pbk=xPnpkXu5qfwIArlHKvJsqKJnGdGbJK1tT2GzWMyLohA&sid=9c56fddf237e8eaf&type=tcp&headerType=none&path=%2F%2B#%F0%9F%8C%90%20Server
+vless://1b4b11d5-4c2d-4533-9a55-636757cdee94@195.211.98.43:443?flow=xtls-rprx-vision&fp=random&pbk=xPnpkXu5qfwIArlHKvJsqKJnGdGbJK1tT2GzWMyLohA&security=reality&sid=9c56fddf237e8eaf&sni=www.cloudflare.com&type=tcp#%F0%9F%8C%90%20Server
