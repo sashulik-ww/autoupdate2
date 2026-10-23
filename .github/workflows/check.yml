@@ -15,7 +15,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,7 +51,7 @@ jobs:
           CONCURRENCY: "150"
           XRAY_WORKERS: "6"
           SB_WORKERS: "6"
-          MAX_CORE_CANDIDATES: "3000"
+          CORE_RATIO: "0.85"
           XRAY_TIMEOUT: "9"
         run: python checker.py
 
