@@ -20,13 +20,14 @@ import urllib.request
 # ====================== НАСТРОЙКИ ======================
 SOURCE_URL = os.getenv(
     "SOURCE_URL",
-    "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt",
+    "https://raw.githubusercontent.com/nikita29a/FreeProxyList/refs/heads/main/mirror/1.txt",
 )
 TIMEOUT = float(os.getenv("TIMEOUT", "8"))
 CONCURRENCY = int(os.getenv("CONCURRENCY", "150"))
-XRAY_WORKERS = int(os.getenv("XRAY_WORKERS", "8"))
+XRAY_WORKERS = int(os.getenv("XRAY_WORKERS", "6"))
+SB_WORKERS = int(os.getenv("SB_WORKERS", "6"))
 XRAY_TIMEOUT = float(os.getenv("XRAY_TIMEOUT", "9"))
-XRAY_RATIO = float(os.getenv("XRAY_RATIO", "0.85"))
+CORE_RATIO = float(os.getenv("CORE_RATIO", "0.85"))
 
 OUT_DIR = Path(os.getenv("OUT_DIR", "results"))
 
@@ -40,12 +41,13 @@ RU_MAX_PER_IP = 2
 RU_MAX_TOTAL = 250
 
 XRAY_BIN = os.getenv("XRAY_BIN", "xray")
+SINGBOX_BIN = os.getenv("SINGBOX_BIN", "sing-box")
 
 SUPPORTED_SCHEMES = (
     "vless", "vmess", "trojan", "ss", "ssr",
     "hysteria2", "hy2", "tuic", "socks5", "http", "https",
 )
-XRAY_SUPPORTED = {"vless", "vmess", "trojan", "ss"}
+CORE_SUPPORTED = {"vless", "vmess", "trojan", "ss", "hysteria2"}
 
 GOOD_SNI = {
     "vk.com", "www.vk.com", "m.vk.com",
@@ -229,7 +231,7 @@ def base_link(proxy_line: str) -> str:
     return proxy_line.split("#", 1)[0].strip()
 
 
-# ====================== XRAY ======================
+# ====================== XRAY CONFIGS ======================
 def _xray_inbound(port: int) -> dict:
     return {
         "port": port, "listen": "127.0.0.1", "protocol": "socks",
@@ -266,8 +268,7 @@ def _xray_vless(line: str, port: int) -> dict | None:
     flow = (qs.get("flow") or [""])[0]
     path = (qs.get("path") or ["/"])[0]
     host_h = (qs.get("host") or [sni])[0]
-    pbk = (qs.get("pbk") or [""])[0]
-    sid = (qs.get("sid") or [""])[0]
+    pbk, sid = (qs.get("pbk") or [""])[0], (qs.get("sid") or [""])[0]
     stream: dict = {"network": network}
     if security == "reality":
         stream["security"] = "reality"
@@ -402,6 +403,158 @@ def _xray_ss(line: str, port: int) -> dict | None:
     }
 
 
+# ====================== SING-BOX CONFIGS ======================
+def make_singbox_config(proxy_line: str, local_port: int) -> dict | None:
+    scheme = get_scheme(proxy_line)
+    try:
+        outbound = None
+        if scheme == "vless":
+            outbound = _sb_vless(proxy_line)
+        elif scheme == "vmess":
+            outbound = _sb_vmess(proxy_line)
+        elif scheme == "trojan":
+            outbound = _sb_trojan(proxy_line)
+        elif scheme == "ss":
+            outbound = _sb_ss(proxy_line)
+        elif scheme == "hysteria2":
+            outbound = _sb_hy2(proxy_line)
+        if not outbound:
+            return None
+        return {
+            "log": {"level": "panic"},
+            "inbounds": [{
+                "type": "socks", "tag": "in",
+                "listen": "127.0.0.1", "listen_port": local_port,
+            }],
+            "outbounds": [outbound, {"type": "direct", "tag": "direct"}],
+        }
+    except Exception:
+        return None
+
+
+def _sb_vless(line: str) -> dict | None:
+    u = urlparse(line.split("#", 1)[0])
+    host, port, uuid_ = u.hostname, u.port or 443, u.username
+    if not host or not uuid_:
+        return None
+    qs = parse_qs(u.query)
+    security = (qs.get("security") or ["none"])[0].lower()
+    network = (qs.get("type") or ["tcp"])[0].lower()
+    sni = (qs.get("sni") or qs.get("host") or [host])[0]
+    fp = (qs.get("fp") or ["chrome"])[0]
+    flow = (qs.get("flow") or [""])[0]
+    path = (qs.get("path") or ["/"])[0]
+    pbk, sid = (qs.get("pbk") or [""])[0], (qs.get("sid") or [""])[0]
+    ob: dict = {"type": "vless", "tag": "out", "server": host, "server_port": port, "uuid": uuid_}
+    if flow:
+        ob["flow"] = flow
+    if security == "reality":
+        ob["tls"] = {
+            "enabled": True, "server_name": sni,
+            "utls": {"enabled": True, "fingerprint": fp},
+            "reality": {"enabled": True, "public_key": pbk, "short_id": sid},
+        }
+    elif security in ("tls", "xtls"):
+        ob["tls"] = {"enabled": True, "server_name": sni, "insecure": True,
+                     "utls": {"enabled": True, "fingerprint": fp}}
+    if network == "ws":
+        ob["transport"] = {"type": "ws", "path": path,
+                           "headers": {"Host": (qs.get("host") or [sni])[0]}}
+    elif network == "grpc":
+        ob["transport"] = {"type": "grpc", "service_name": path.lstrip("/")}
+    return ob
+
+
+def _sb_vmess(line: str) -> dict | None:
+    payload = line.split("://", 1)[1].strip().split("#")[0]
+    payload += "=" * ((4 - len(payload) % 4) % 4)
+    data = json.loads(base64.b64decode(payload).decode("utf-8", errors="ignore"))
+    host = data.get("add") or data.get("host")
+    port = int(data.get("port", 443))
+    uuid_ = data.get("id")
+    if not host or not uuid_:
+        return None
+    network = (data.get("net") or "tcp").lower()
+    tls = (data.get("tls") or "").lower()
+    sni = data.get("sni") or data.get("host") or host
+    path = data.get("path") or "/"
+    ob: dict = {
+        "type": "vmess", "tag": "out", "server": host, "server_port": port,
+        "uuid": uuid_, "security": data.get("scy") or "auto",
+        "alter_id": int(data.get("aid") or 0),
+    }
+    if tls:
+        ob["tls"] = {"enabled": True, "server_name": sni, "insecure": True}
+    if network == "ws":
+        ob["transport"] = {"type": "ws", "path": path,
+                           "headers": {"Host": data.get("host") or sni}}
+    elif network == "grpc":
+        ob["transport"] = {"type": "grpc", "service_name": path.lstrip("/")}
+    return ob
+
+
+def _sb_trojan(line: str) -> dict | None:
+    u = urlparse(line.split("#", 1)[0])
+    host, port = u.hostname, u.port or 443
+    password = unquote(u.username or "")
+    if not host or not password:
+        return None
+    qs = parse_qs(u.query)
+    sni = (qs.get("sni") or qs.get("peer") or [host])[0]
+    network = (qs.get("type") or ["tcp"])[0].lower()
+    path = (qs.get("path") or ["/"])[0]
+    fp = (qs.get("fp") or ["chrome"])[0]
+    ob: dict = {
+        "type": "trojan", "tag": "out",
+        "server": host, "server_port": port, "password": password,
+        "tls": {"enabled": True, "server_name": sni, "insecure": True,
+                "utls": {"enabled": True, "fingerprint": fp}},
+    }
+    if network == "ws":
+        ob["transport"] = {"type": "ws", "path": path,
+                           "headers": {"Host": (qs.get("host") or [sni])[0]}}
+    elif network == "grpc":
+        ob["transport"] = {"type": "grpc", "service_name": path.lstrip("/")}
+    return ob
+
+
+def _sb_ss(line: str) -> dict | None:
+    u = urlparse(line.split("#", 1)[0])
+    host, port = u.hostname, u.port
+    if not host or not port:
+        return None
+    userinfo = u.username or ""
+    if u.password:
+        method, password = unquote(userinfo), unquote(u.password)
+    else:
+        try:
+            decoded = b64decode_urlsafe(userinfo).decode("utf-8", errors="ignore")
+            method, password = decoded.split(":", 1)
+        except Exception:
+            return None
+    return {
+        "type": "shadowsocks", "tag": "out",
+        "server": host, "server_port": port,
+        "method": method, "password": password,
+    }
+
+
+def _sb_hy2(line: str) -> dict | None:
+    u = urlparse(line.split("#", 1)[0])
+    host, port = u.hostname, u.port or 443
+    password = unquote(u.username or "")
+    if not host or not password:
+        return None
+    qs = parse_qs(u.query)
+    sni = (qs.get("sni") or [host])[0]
+    insecure = (qs.get("insecure") or ["0"])[0] in ("1", "true")
+    return {
+        "type": "hysteria2", "tag": "out",
+        "server": host, "server_port": port, "password": password,
+        "tls": {"enabled": True, "server_name": sni, "insecure": insecure},
+    }
+
+
 # ====================== ПРОВЕРКИ ======================
 async def resolve_to_ip(host: str) -> str:
     if not host:
@@ -435,10 +588,7 @@ async def tcp_check(host: str, port: int) -> float | None:
         return None
 
 
-def xray_test_sync(proxy_line: str, local_port: int) -> float | None:
-    cfg = make_xray_config(proxy_line, local_port)
-    if not cfg:
-        return None
+def _run_core_test(bin_name: str, cfg: dict, local_port: int) -> float | None:
     conf_path = None
     proc = None
     try:
@@ -446,11 +596,11 @@ def xray_test_sync(proxy_line: str, local_port: int) -> float | None:
             json.dump(cfg, f)
             conf_path = f.name
         proc = subprocess.Popen(
-            [XRAY_BIN, "run", "-c", conf_path],
+            [bin_name, "run", "-c", conf_path],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             preexec_fn=os.setsid,
         )
-        time.sleep(0.4)
+        time.sleep(0.45)
         if proc.poll() is not None:
             return None
         started = time.monotonic()
@@ -482,6 +632,18 @@ def xray_test_sync(proxy_line: str, local_port: int) -> float | None:
                 pass
 
 
+def core_test_sync(proxy_line: str, local_port: int, use_singbox: bool) -> float | None:
+    if use_singbox:
+        cfg = make_singbox_config(proxy_line, local_port)
+        if not cfg:
+            return None
+        return _run_core_test(SINGBOX_BIN, cfg, local_port)
+    cfg = make_xray_config(proxy_line, local_port)
+    if not cfg:
+        return None
+    return _run_core_test(XRAY_BIN, cfg, local_port)
+
+
 async def check_tcp(proxy_line: str, sem: asyncio.Semaphore) -> dict | None:
     async with sem:
         host, port = extract_host_port(proxy_line)
@@ -498,21 +660,23 @@ async def check_tcp(proxy_line: str, sem: asyncio.Semaphore) -> dict | None:
             "latency_ms": int(lat),
             "is_reality": vinfo.get("is_reality", False),
             "sni": vinfo.get("sni", ""),
-            "xray_ok": False,
+            "core_ok": False,
             "country": "UNKNOWN", "city": "",
         }
 
 
-async def check_xray(item: dict, port_q: asyncio.Queue) -> dict | None:
+async def check_core(item: dict, port_q: asyncio.Queue, use_singbox: bool) -> dict | None:
     port = await port_q.get()
     try:
         loop = asyncio.get_running_loop()
-        lat = await loop.run_in_executor(None, xray_test_sync, item["raw"], port)
+        lat = await loop.run_in_executor(
+            None, core_test_sync, item["raw"], port, use_singbox
+        )
         if lat is None:
             return None
         item = dict(item)
         item["latency_ms"] = int(lat)
-        item["xray_ok"] = True
+        item["core_ok"] = True
         return item
     finally:
         await port_q.put(port)
@@ -540,7 +704,6 @@ def smart_filter(
     for it in items:
         if len(out) >= max_total:
             break
-
         ip = (it.get("ip") or "").strip()
         country = it.get("country", "UNKNOWN")
         raw = it.get("raw") or it.get("proxy") or ""
@@ -564,7 +727,6 @@ def smart_filter(
             seen_links.add(base)
         country_counts[country] += 1
         out.append(it)
-
     return out
 
 
@@ -579,16 +741,15 @@ def smart_filter_white(items):
         return (reality, ru, good, it["latency_ms"])
 
     vless.sort(key=prio)
-    ip_c, country_c, out = defaultdict(int), defaultdict(int), []
-    seen_hp, seen_links = set(), set()
+    ip_c, country_c = defaultdict(int), defaultdict(int)
+    seen_hp, seen_links, out = set(), set(), []
     for it in vless:
         if len(out) >= WHITE_MAX_TOTAL:
             break
         ip = (it.get("ip") or "").strip()
         country = it.get("country", "UNKNOWN")
         raw = it.get("raw") or ""
-        hp = host_port_key(raw)
-        base = base_link(raw)
+        hp, base = host_port_key(raw), base_link(raw)
         if ip_c[ip] >= WHITE_MAX_PER_IP:
             continue
         if hp and hp in seen_hp:
@@ -610,15 +771,13 @@ def smart_filter_white(items):
 def smart_filter_russia(items):
     ru = [i for i in items if i.get("country") == "RU"]
     ru.sort(key=lambda x: x["latency_ms"])
-    ip_c, out = defaultdict(int), []
-    seen_hp, seen_links = set(), set()
+    ip_c, seen_hp, seen_links, out = defaultdict(int), set(), set(), []
     for it in ru:
         if len(out) >= RU_MAX_TOTAL:
             break
         ip = (it.get("ip") or "").strip()
         raw = it.get("raw") or ""
-        hp = host_port_key(raw)
-        base = base_link(raw)
+        hp, base = host_port_key(raw), base_link(raw)
         if ip_c[ip] >= RU_MAX_PER_IP:
             continue
         if hp and hp in seen_hp:
@@ -680,31 +839,50 @@ async def main_async() -> int:
     tcp_alive = sorted([r for r in tcp_res if r], key=lambda x: x["latency_ms"])
     print(f"TCP alive: {len(tcp_alive)}")
 
-    xray_pool = [x for x in tcp_alive if x["scheme"] in XRAY_SUPPORTED]
-    take = max(1, int(len(xray_pool) * XRAY_RATIO))
-    candidates = xray_pool[:take]
-    print(f"Xray candidates ({int(XRAY_RATIO * 100)}%): {len(candidates)}")
+    core_pool = [x for x in tcp_alive if x["scheme"] in CORE_SUPPORTED]
+    take = max(1, int(len(core_pool) * CORE_RATIO))
+    candidates = core_pool[:take]
+    print(f"Core candidates ({int(CORE_RATIO*100)}%): {len(candidates)}")
 
-    xray_ok = []
     has_xray = subprocess.run([XRAY_BIN, "version"], capture_output=True).returncode == 0
-    if has_xray and candidates:
-        print("Stage 2: Xray + gstatic...")
+    has_sb = subprocess.run([SINGBOX_BIN, "version"], capture_output=True).returncode == 0
+    print(f"xray={has_xray}, sing-box={has_sb}")
+
+    core_ok: list[dict] = []
+
+    async def run_core_stage(use_sb: bool, workers: int, label: str):
+        nonlocal core_ok
+        if not candidates:
+            return
+        print(f"Stage: {label}...")
         port_q: asyncio.Queue = asyncio.Queue()
-        for i in range(XRAY_WORKERS):
-            await port_q.put(11000 + i)
-        sem_x = asyncio.Semaphore(XRAY_WORKERS)
+        base = 12000 if use_sb else 11000
+        for i in range(workers):
+            await port_q.put(base + i)
+        sem_c = asyncio.Semaphore(workers)
 
         async def worker(it):
-            async with sem_x:
-                return await check_xray(it, port_q)
+            async with sem_c:
+                return await check_core(it, port_q, use_sb)
 
         results = await asyncio.gather(*[worker(it) for it in candidates])
-        xray_ok = [r for r in results if r]
-        print(f"Xray OK: {len(xray_ok)}")
+        ok = [r for r in results if r]
+        print(f"{label} OK: {len(ok)}")
+        by_raw = {x["raw"]: x for x in core_ok}
+        for r in ok:
+            prev = by_raw.get(r["raw"])
+            if not prev or r["latency_ms"] < prev["latency_ms"]:
+                by_raw[r["raw"]] = r
+        core_ok = list(by_raw.values())
 
-    final_map = {x["raw"]: x for x in xray_ok}
+    if has_sb:
+        await run_core_stage(True, SB_WORKERS, "sing-box")
+    if has_xray:
+        await run_core_stage(False, XRAY_WORKERS, "xray")
+
+    final_map = {x["raw"]: x for x in core_ok}
     for item in tcp_alive:
-        if item["scheme"] not in XRAY_SUPPORTED and item["raw"] not in final_map:
+        if item["scheme"] not in CORE_SUPPORTED and item["raw"] not in final_map:
             final_map[item["raw"]] = item
     final = sorted(final_map.values(), key=lambda x: x["latency_ms"])
     print(f"Final pool: {len(final)}")
@@ -718,13 +896,12 @@ async def main_async() -> int:
         it["city"] = city
         it["proxy"] = format_clean_proxy(it["raw"], it["country"], it["city"])
 
-    # xray_all — уникальные IP / host:port / base link
-    seen_ips, seen_hp, seen_links, xray_all = set(), set(), set(), []
-    for it in sorted(xray_ok, key=lambda x: x["latency_ms"]):
+    # core_all / xray_all
+    seen_ips, seen_hp, seen_links, core_all = set(), set(), set(), []
+    for it in sorted(core_ok, key=lambda x: x["latency_ms"]):
         ip = (it.get("ip") or "").strip()
         raw = it.get("raw") or ""
-        hp = host_port_key(raw)
-        base = base_link(raw)
+        hp, base = host_port_key(raw), base_link(raw)
         if ip and ip in seen_ips:
             continue
         if hp and hp in seen_hp:
@@ -738,9 +915,9 @@ async def main_async() -> int:
         if base:
             seen_links.add(base)
         it["proxy"] = format_clean_proxy(raw, it.get("country", "UNKNOWN"), it.get("city", ""))
-        xray_all.append(it)
-    write_list(OUT_DIR / "xray_all.txt", xray_all)
-    print(f"xray_all.txt: {len(xray_all)}")
+        core_all.append(it)
+    write_list(OUT_DIR / "xray_all.txt", core_all)
+    print(f"xray_all.txt: {len(core_all)}")
 
     main_list = smart_filter(final, max_total=MAX_TOTAL_ALL, deprioritize_ss=True)
     write_list(OUT_DIR / "all.txt", main_list)
@@ -774,4 +951,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main()) 
+    sys.exit(main())
