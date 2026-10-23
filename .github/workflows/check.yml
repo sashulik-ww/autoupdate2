@@ -29,35 +29,33 @@ jobs:
 
       - name: Install Xray
         run: |
-          XRAY_VERSION=$(curl -sL https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oP '"tag_name": "\K(.*)(?=")')
-          echo "Installing Xray $XRAY_VERSION"
+          set -e
+          XRAY_VERSION=$(curl -sL https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+          echo "Xray $XRAY_VERSION"
           wget -q "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip" -O xray.zip
           unzip -q xray.zip -d xray-bin
-          sudo mv xray-bin/xray /usr/local/bin/xray
-          chmod +x /usr/local/bin/xray
+          sudo install -m 755 xray-bin/xray /usr/local/bin/xray
+          rm -rf xray.zip xray-bin
           xray version
-          
-      
+
       - name: Install sing-box
         run: |
           set -e
-          VER="1.11.15"
-          TAG="v${VER}"
-          wget -q "https://github.com/SagerNet/sing-box/releases/download/\( {TAG}/sing-box- \){VER}-linux-amd64.tar.gz" -O sb.tar.gz
+          VER=1.11.15
+          wget -q "https://github.com/SagerNet/sing-box/releases/download/v\( {VER}/sing-box- \){VER}-linux-amd64.tar.gz" -O sb.tar.gz
           tar -xzf sb.tar.gz
           sudo install -m 755 sing-box-*/sing-box /usr/local/bin/sing-box
           rm -rf sb.tar.gz sing-box-*
           sing-box version
-          
+
       - name: Check proxies
         env:
           TIMEOUT: "8"
           CONCURRENCY: "150"
-          XRAY_WORKERS: "8"
-          MAX_XRAY_CANDIDATES: "8000"
-          XRAY_TIMEOUT: "9"
+          XRAY_WORKERS: "6"
           SB_WORKERS: "6"
           MAX_CORE_CANDIDATES: "3000"
+          XRAY_TIMEOUT: "9"
         run: python checker.py
 
       - name: Commit results
