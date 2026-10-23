@@ -765,13 +765,24 @@ async def main_async() -> int:
             xray_ok = [r for r in results if r]
             print(f"Xray рабочих: {len(xray_ok)}")
 
-    if not xray_ok:
-        xray_ok = tcp_alive  # если xray ничего не дал — используем TCP
-
     final = xray_ok
     final.sort(key=lambda x: x["latency_ms"])
 
-    # ---- запись ----
+    # ---- все, кто прошёл Xray (только уникальный IP, без лимитов) ----
+    seen_ips = set()
+    xray_unique = []
+    for item in final:
+        ip = item["ip"]
+        if ip and ip in seen_ips:
+            continue
+        if ip:
+            seen_ips.add(ip)
+        xray_unique.append(item)
+
+    write_list(OUT_DIR / "xray_all.txt", xray_unique)
+    print(f"Xray all (unique IP): {len(xray_unique)}")
+
+    # ---- обычные фильтрованные списки ----
     main_list = smart_filter(final)
     write_list(OUT_DIR / "all.txt", main_list)
     write_list(OUT_DIR / "working_proxies.txt", main_list)
