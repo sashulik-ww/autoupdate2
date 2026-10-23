@@ -36,7 +36,19 @@ jobs:
           sudo mv xray-bin/xray /usr/local/bin/xray
           chmod +x /usr/local/bin/xray
           xray version
-
+          
+      - name: Install sing-box
+        run: |
+          SB_VERSION=$(curl -sL https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep -oP '"tag_name": "\K(v?[^"]+)(?=")' | head -1)
+          echo "sing-box $SB_VERSION"
+          # убрать ведущую v если есть
+          VER=${SB_VERSION#v}
+          wget -q "https://github.com/SagerNet/sing-box/releases/download/\( {SB_VERSION}/sing-box- \){VER}-linux-amd64.tar.gz" -O sb.tar.gz
+          tar -xzf sb.tar.gz
+          sudo mv sing-box-*/sing-box /usr/local/bin/sing-box
+          chmod +x /usr/local/bin/sing-box
+          sing-box version
+          
       - name: Check proxies
         env:
           TIMEOUT: "8"
