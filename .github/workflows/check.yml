@@ -30,9 +30,7 @@ jobs:
       - name: Install Xray
         run: |
           set -e
-          XRAY_VERSION=$(curl -sL https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oP '"tag_name": "\K[^"]+')
-          echo "Xray $XRAY_VERSION"
-          wget -q "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip" -O xray.zip
+          wget -q https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -O xray.zip
           unzip -q xray.zip -d xray-bin
           sudo install -m 755 xray-bin/xray /usr/local/bin/xray
           rm -rf xray.zip xray-bin
@@ -41,11 +39,10 @@ jobs:
       - name: Install sing-box
         run: |
           set -e
-          VER=1.11.15
-          wget -q "https://github.com/SagerNet/sing-box/releases/download/v\( {VER}/sing-box- \){VER}-linux-amd64.tar.gz" -O sb.tar.gz
+          wget -q https://github.com/SagerNet/sing-box/releases/download/v1.11.15/sing-box-1.11.15-linux-amd64.tar.gz -O sb.tar.gz
           tar -xzf sb.tar.gz
-          sudo install -m 755 sing-box-*/sing-box /usr/local/bin/sing-box
-          rm -rf sb.tar.gz sing-box-*
+          sudo install -m 755 sing-box-1.11.15-linux-amd64/sing-box /usr/local/bin/sing-box
+          rm -rf sb.tar.gz sing-box-1.11.15-linux-amd64
           sing-box version
 
       - name: Check proxies
@@ -67,6 +64,6 @@ jobs:
             echo "Нет изменений"
             exit 0
           fi
-          git commit -m "Update proxies: $(date -u +'%Y-%m-%d %H:%M') UTC"
+          git commit -m "Update proxies"
           git pull --rebase origin main || true
           git push origin HEAD:main
