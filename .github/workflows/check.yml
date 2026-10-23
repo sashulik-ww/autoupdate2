@@ -42,7 +42,7 @@ jobs:
           TIMEOUT: "8"
           CONCURRENCY: "150"
           XRAY_WORKERS: "8"
-          MAX_XRAY_CANDIDATES: "3000"
+          MAX_XRAY_CANDIDATES: "8000"
           XRAY_TIMEOUT: "9"
         run: python checker.py
 
