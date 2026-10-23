@@ -56,6 +56,8 @@ jobs:
           XRAY_WORKERS: "8"
           MAX_XRAY_CANDIDATES: "8000"
           XRAY_TIMEOUT: "9"
+          SB_WORKERS: "6"
+          MAX_CORE_CANDIDATES: "3000"
         run: python checker.py
 
       - name: Commit results
