@@ -25,13 +25,13 @@ CONCURRENCY = int(os.getenv("CONCURRENCY", "200"))
 OUT_DIR = Path(os.getenv("OUT_DIR", "results"))
 
 # Основные списки
-MAX_PER_COUNTRY = 18
-MAX_TOTAL = 250
+MAX_PER_COUNTRY = 20
+MAX_TOTAL = 500
 
 # White list
 WHITE_MAX_PER_IP = 2
-WHITE_MAX_PER_COUNTRY = 15
-WHITE_MAX_TOTAL = 450
+WHITE_MAX_PER_COUNTRY = 20
+WHITE_MAX_TOTAL = 600
 
 SUPPORTED_SCHEMES = (
     "vless", "vmess", "trojan", "ss", "ssr",
@@ -53,19 +53,59 @@ GOOD_SNI = {
 }
 
 COUNTRY_DATA = {
-    "DE": ("Germany", "🇩🇪"), "NL": ("Netherlands", "🇳🇱"),
-    "US": ("United States", "🇺🇸"), "FR": ("France", "🇫🇷"),
-    "GB": ("United Kingdom", "🇬🇧"), "SG": ("Singapore", "🇸🇬"),
-    "CA": ("Canada", "🇨🇦"), "JP": ("Japan", "🇯🇵"),
-    "FI": ("Finland", "🇫🇮"), "PL": ("Poland", "🇵🇱"),
-    "RU": ("Russia", "🇷🇺"), "TR": ("Turkey", "🇹🇷"),
-    "KZ": ("Kazakhstan", "🇰🇿"), "SE": ("Sweden", "🇸🇪"),
-    "CH": ("Switzerland", "🇨🇭"), "IT": ("Italy", "🇮🇹"),
-    "ES": ("Spain", "🇪🇸"), "AT": ("Austria", "🇦🇹"),
-    "BE": ("Belgium", "🇧🇪"), "CZ": ("Czechia", "🇨🇿"),
-    "HK": ("Hong Kong", "🇭🇰"), "KR": ("South Korea", "🇰🇷"),
-    "TW": ("Taiwan", "🇹🇼"), "AU": ("Australia", "🇦🇺"),
-    "IN": ("India", "🇮🇳"), "UA": ("Ukraine", "🇺🇦"),
+    "DE": ("Germany", "🇩🇪"),
+    "NL": ("Netherlands", "🇳🇱"),
+    "US": ("United States", "🇺🇸"),
+    "FR": ("France", "🇫🇷"),
+    "GB": ("United Kingdom", "🇬🇧"),
+    "SG": ("Singapore", "🇸🇬"),
+    "CA": ("Canada", "🇨🇦"),
+    "JP": ("Japan", "🇯🇵"),
+    "FI": ("Finland", "🇫🇮"),
+    "PL": ("Poland", "🇵🇱"),
+    "RU": ("Russia", "🇷🇺"),
+    "TR": ("Turkey", "🇹🇷"),
+    "KZ": ("Kazakhstan", "🇰🇿"),
+    "SE": ("Sweden", "🇸🇪"),
+    "CH": ("Switzerland", "🇨🇭"),
+    "IT": ("Italy", "🇮🇹"),
+    "ES": ("Spain", "🇪🇸"),
+    "AT": ("Austria", "🇦🇹"),
+    "BE": ("Belgium", "🇧🇪"),
+    "CZ": ("Czechia", "🇨🇿"),
+    "HK": ("Hong Kong", "🇭🇰"),
+    "KR": ("South Korea", "🇰🇷"),
+    "TW": ("Taiwan", "🇹🇼"),
+    "AU": ("Australia", "🇦🇺"),
+    "IN": ("India", "🇮🇳"),
+    "UA": ("Ukraine", "🇺🇦"),
+    "HU": ("Hungary", "🇭🇺"),
+    "RO": ("Romania", "🇷🇴"),
+    "BG": ("Bulgaria", "🇧🇬"),
+    "RS": ("Serbia", "🇷🇸"),
+    "SK": ("Slovakia", "🇸🇰"),
+    "LT": ("Lithuania", "🇱🇹"),
+    "LV": ("Latvia", "🇱🇻"),
+    "EE": ("Estonia", "🇪🇪"),
+    "IE": ("Ireland", "🇮🇪"),
+    "PT": ("Portugal", "🇵🇹"),
+    "GR": ("Greece", "🇬🇷"),
+    "NO": ("Norway", "🇳🇴"),
+    "DK": ("Denmark", "🇩🇰"),
+    "MX": ("Mexico", "🇲🇽"),
+    "BR": ("Brazil", "🇧🇷"),
+    "AR": ("Argentina", "🇦🇷"),
+    "CL": ("Chile", "🇨🇱"),
+    "IL": ("Israel", "🇮🇱"),
+    "AE": ("UAE", "🇦🇪"),
+    "SA": ("Saudi Arabia", "🇸🇦"),
+    "TH": ("Thailand", "🇹🇭"),
+    "VN": ("Vietnam", "🇻🇳"),
+    "ID": ("Indonesia", "🇮🇩"),
+    "MY": ("Malaysia", "🇲🇾"),
+    "PH": ("Philippines", "🇵🇭"),
+    "NZ": ("New Zealand", "🇳🇿"),
+    "ZA": ("South Africa", "🇿🇦"),
     "UNKNOWN": ("Server", "🌐"),
 }
 
@@ -96,6 +136,33 @@ COUNTRY_MAP = {
     "australia": "AU", "австралия": "AU",
     "india": "IN", "индия": "IN",
     "ukraine": "UA", "украина": "UA",
+    "hungary": "HU", "венгрия": "HU",
+    "romania": "RO", "румыния": "RO",
+    "bulgaria": "BG", "болгария": "BG",
+    "serbia": "RS", "сербия": "RS",
+    "slovakia": "SK", "словакия": "SK",
+    "lithuania": "LT", "литва": "LT",
+    "latvia": "LV", "латвия": "LV",
+    "estonia": "EE", "эстония": "EE",
+    "ireland": "IE", "ирландия": "IE",
+    "portugal": "PT", "португалия": "PT",
+    "greece": "GR", "греция": "GR",
+    "norway": "NO", "норвегия": "NO",
+    "denmark": "DK", "дания": "DK",
+    "mexico": "MX", "мексика": "MX",
+    "brazil": "BR", "бразилия": "BR",
+    "argentina": "AR", "аргентина": "AR",
+    "chile": "CL", "чили": "CL",
+    "israel": "IL", "израиль": "IL",
+    "uae": "AE", "emirates": "AE", "оаэ": "AE",
+    "saudi": "SA", "saudi arabia": "SA", "саудовская": "SA",
+    "thailand": "TH", "тайланд": "TH", "таиланд": "TH",
+    "vietnam": "VN", "вьетнам": "VN",
+    "indonesia": "ID", "индонезия": "ID",
+    "malaysia": "MY", "малайзия": "MY",
+    "philippines": "PH", "филиппины": "PH",
+    "new zealand": "NZ", "новая зеландия": "NZ",
+    "south africa": "ZA", "юар": "ZA", "африка": "ZA",
 }
 
 
@@ -203,8 +270,6 @@ def parse_vless_params(proxy_line: str) -> dict:
 def format_clean_proxy(proxy_line: str, country_code: str, latency_ms: int | None = None) -> str:
     info = COUNTRY_DATA.get(country_code, COUNTRY_DATA["UNKNOWN"])
     name = f"{info[1]} {info[0]}"
-    if latency_ms is not None:
-        name = f"{name} | {latency_ms}ms"
 
     scheme = proxy_line.split("://", 1)[0].lower()
 
