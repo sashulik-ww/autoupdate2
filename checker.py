@@ -12,7 +12,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,24 +25,28 @@ SOURCE_URL = os.getenv(
 )
 TIMEOUT = float(os.getenv("TIMEOUT", "8"))
 CONCURRENCY = int(os.getenv("CONCURRENCY", "150"))
-XRAY_WORKERS = int(os.getenv("XRAY_WORKERS", "8"))          # одновременных xray
+XRAY_WORKERS = int(os.getenv("XRAY_WORKERS", "8"))
 XRAY_TIMEOUT = float(os.getenv("XRAY_TIMEOUT", "9"))
-MAX_XRAY_CANDIDATES = int(os.getenv("MAX_XRAY_CANDIDATES", "1200"))  # сколько пропускаем в xray
+MAX_XRAY_CANDIDATES = int(os.getenv("MAX_XRAY_CANDIDATES", "3500"))
 
 OUT_DIR = Path(os.getenv("OUT_DIR", "results"))
 
-MAX_PER_COUNTRY = 20
-MAX_TOTAL = 500
-WHITE_MAX_PER_IP = 2
-WHITE_MAX_PER_COUNTRY = 20
-WHITE_MAX_TOTAL = 600
+# Главные лимиты
+MAX_PER_COUNTRY = 25
+MAX_TOTAL_PER_PROTOCOL = 550          # на каждый протокол
+WHITE_MAX_PER_IP = 3
+WHITE_MAX_PER_COUNTRY = 25
+WHITE_MAX_TOTAL = 550
 
 XRAY_BIN = os.getenv("XRAY_BIN", "xray")
 
 SUPPORTED_SCHEMES = (
     "vless", "vmess", "trojan", "ss", "ssr",
-    "hysteria2", "hy2", "tuic", "socks5", "http", "https"
+    "hysteria2", "hy2", "tuic", "socks5", "http", "https",
 )
+
+# Протоколы, которые умеем проверять через Xray
+XRAY_SUPPORTED = {"vless", "vmess", "trojan", "ss"}
 
 GOOD_SNI = {
     "vk.com", "www.vk.com", "m.vk.com",
@@ -51,10 +54,8 @@ GOOD_SNI = {
     "mail.ru", "www.mail.ru", "ok.ru", "www.ok.ru",
     "userapi.com", "api.vk.com",
     "google.com", "www.google.com",
-    "microsoft.com", "www.microsoft.com",
-    "apple.com", "www.apple.com",
-    "cloudflare.com", "www.cloudflare.com",
-    "github.com", "www.github.com", "discord.com",
+    "microsoft.com", "apple.com", "cloudflare.com",
+    "github.com", "discord.com",
 }
 
 COUNTRY_DATA = {
@@ -82,61 +83,12 @@ COUNTRY_DATA = {
     "IL": ("Israel", "🇮🇱"), "AE": ("UAE", "🇦🇪"),
     "TH": ("Thailand", "🇹🇭"), "VN": ("Vietnam", "🇻🇳"),
     "ID": ("Indonesia", "🇮🇩"), "MY": ("Malaysia", "🇲🇾"),
+    "PH": ("Philippines", "🇵🇭"), "NZ": ("New Zealand", "🇳🇿"),
+    "ZA": ("South Africa", "🇿🇦"), "CN": ("China", "🇨🇳"),
     "UNKNOWN": ("Server", "🌐"),
 }
 
-COUNTRY_MAP = {
-    "germany": "DE", "deutschland": "DE", "германия": "DE",
-    "netherlands": "NL", "nederland": "NL", "нидерланды": "NL", "голландия": "NL",
-    "united states": "US", "usa": "US", "america": "US", "сша": "US",
-    "france": "FR", "франция": "FR",
-    "united kingdom": "GB", "uk": "GB", "britain": "GB", "великобритания": "GB", "англия": "GB",
-    "singapore": "SG", "сингапур": "SG",
-    "canada": "CA", "канада": "CA",
-    "japan": "JP", "япония": "JP",
-    "finland": "FI", "финляндия": "FI",
-    "poland": "PL", "польша": "PL",
-    "russia": "RU", "россия": "RU",
-    "turkey": "TR", "турция": "TR",
-    "kazakhstan": "KZ", "казахстан": "KZ",
-    "sweden": "SE", "швеция": "SE",
-    "switzerland": "CH", "швейцария": "CH",
-    "italy": "IT", "италия": "IT",
-    "spain": "ES", "испания": "ES",
-    "austria": "AT", "австрия": "AT",
-    "belgium": "BE", "бельгия": "BE",
-    "czechia": "CZ", "czech": "CZ", "чехия": "CZ",
-    "hong kong": "HK", "hongkong": "HK", "гонконг": "HK",
-    "korea": "KR", "south korea": "KR", "корея": "KR",
-    "taiwan": "TW", "тайвань": "TW",
-    "australia": "AU", "австралия": "AU",
-    "india": "IN", "индия": "IN",
-    "ukraine": "UA", "украина": "UA",
-    "hungary": "HU", "венгрия": "HU",
-    "romania": "RO", "румыния": "RO",
-    "bulgaria": "BG", "болгария": "BG",
-    "serbia": "RS", "сербия": "RS",
-    "slovakia": "SK", "словакия": "SK",
-    "lithuania": "LT", "литва": "LT",
-    "latvia": "LV", "латвия": "LV",
-    "estonia": "EE", "эстония": "EE",
-    "ireland": "IE", "ирландия": "IE",
-    "portugal": "PT", "португалия": "PT",
-    "greece": "GR", "греция": "GR",
-    "norway": "NO", "норвегия": "NO",
-    "denmark": "DK", "дания": "DK",
-    "mexico": "MX", "мексика": "MX",
-    "brazil": "BR", "бразилия": "BR",
-    "argentina": "AR", "аргентина": "AR",
-    "israel": "IL", "израиль": "IL",
-    "uae": "AE", "emirates": "AE", "оаэ": "AE",
-    "thailand": "TH", "тайланд": "TH", "таиланд": "TH",
-    "vietnam": "VN", "вьетнам": "VN",
-    "indonesia": "ID", "индонезия": "ID",
-    "malaysia": "MY", "малайзия": "MY",
-}
-
-# ====================== ПАРСИНГ ======================
+# ====================== ВСПОМОГАТЕЛЬНЫЕ ======================
 def fetch_url(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=45) as r:
@@ -152,9 +104,8 @@ def parse_line(line: str) -> str | None:
     scheme = line.split("://", 1)[0].lower()
     if scheme == "socks":
         line = "socks5://" + line.split("://", 1)[1]
-    if scheme not in SUPPORTED_SCHEMES and not line.lower().startswith("socks5://"):
-        return None
-    return line
+        scheme = "socks5"
+    return line if scheme in SUPPORTED_SCHEMES else None
 
 
 def get_scheme(proxy_line: str) -> str:
@@ -182,8 +133,7 @@ def extract_host_port(proxy_line: str) -> tuple[str | None, int]:
     try:
         clean = proxy_line.split("#", 1)[0]
         p = urlsplit(clean)
-        host = p.hostname
-        port = p.port
+        host, port = p.hostname, p.port
         if host:
             if not port:
                 port = 443 if scheme in ("vless", "trojan", "hysteria2", "https", "tuic", "vmess") else 80
@@ -193,32 +143,12 @@ def extract_host_port(proxy_line: str) -> tuple[str | None, int]:
     return None, 0
 
 
-def detect_country(proxy_line: str) -> str:
-    text = proxy_line.lower()
-    if "#" in proxy_line:
-        remark = unquote(proxy_line.split("#", 1)[1]).lower()
-        m = re.search(r"(?:^|[\s\[\(\-_])([a-z]{2})(?:$|[\s\]\)\-_])", remark)
-        if m and m.group(1).upper() in COUNTRY_DATA:
-            return m.group(1).upper()
-        for name, code in COUNTRY_MAP.items():
-            if name in remark:
-                return code
-    m = re.search(r"[#\[\-_/\s]([a-z]{2})[#\]\-_/\s]", text)
-    if m and m.group(1).upper() in COUNTRY_DATA:
-        return m.group(1).upper()
-    for name, code in COUNTRY_MAP.items():
-        if name in text:
-            return code
-    return "UNKNOWN"
-
-
 def parse_vless_params(proxy_line: str) -> dict:
     res = {"security": "", "sni": "", "is_reality": False}
     try:
         if not proxy_line.lower().startswith("vless://"):
             return res
-        clean = proxy_line.split("#", 1)[0]
-        qs = parse_qs(urlsplit(clean).query)
+        qs = parse_qs(urlsplit(proxy_line.split("#", 1)[0]).query)
         security = (qs.get("security") or [""])[0].lower()
         sni = (qs.get("sni") or qs.get("host") or [""])[0].lower()
         res["security"] = security
@@ -229,9 +159,16 @@ def parse_vless_params(proxy_line: str) -> dict:
     return res
 
 
-def format_clean_proxy(proxy_line: str, country_code: str) -> str:
+def format_name(country_code: str, city: str = "") -> str:
     info = COUNTRY_DATA.get(country_code, COUNTRY_DATA["UNKNOWN"])
-    name = f"{info[1]} {info[0]}"
+    flag, country = info
+    if city and city.lower() not in ("", "unknown", "null"):
+        return f"{flag} {country}, {city}"
+    return f"{flag} {country}"
+
+
+def format_clean_proxy(proxy_line: str, country_code: str, city: str = "") -> str:
+    name = format_name(country_code, city)
     scheme = get_scheme(proxy_line)
 
     if scheme == "vmess":
@@ -251,49 +188,74 @@ def format_clean_proxy(proxy_line: str, country_code: str) -> str:
     return f"{base}#{quote(name)}"
 
 
-# ====================== XRAY CONFIG GENERATORS ======================
+# ====================== GEO IP ======================
+def geo_lookup_batch(ips: list[str]) -> dict[str, tuple[str, str]]:
+    """Возвращает {ip: (countryCode, city)} через ip-api.com batch."""
+    result: dict[str, tuple[str, str]] = {}
+    if not ips:
+        return result
+
+    # ip-api batch до 100 штук
+    for i in range(0, len(ips), 100):
+        chunk = ips[i:i + 100]
+        try:
+            body = json.dumps([{"query": ip, "fields": "status,countryCode,city,query"} for ip in chunk]).encode()
+            req = urllib.request.Request(
+                "http://ip-api.com/batch",
+                data=body,
+                headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                data = json.loads(resp.read().decode())
+            for item in data:
+                if item.get("status") == "success":
+                    ip = item.get("query", "")
+                    code = (item.get("countryCode") or "UNKNOWN").upper()
+                    city = item.get("city") or ""
+                    result[ip] = (code, city)
+        except Exception as e:
+            print(f"Geo lookup error: {e}")
+        time.sleep(1.1)  # бережём лимит
+    return result
+
+
+# ====================== XRAY CONFIGS ======================
 def b64decode_urlsafe(s: str) -> bytes:
-    s = s.strip()
-    s += "=" * ((4 - len(s) % 4) % 4)
+    s = s.strip() + "=" * ((4 - len(s) % 4) % 4)
     return base64.urlsafe_b64decode(s)
 
 
+def _base_inbound(port: int) -> dict:
+    return {
+        "port": port,
+        "listen": "127.0.0.1",
+        "protocol": "socks",
+        "settings": {"udp": True, "auth": "noauth"},
+    }
+
+
 def make_xray_config(proxy_line: str, local_port: int) -> dict | None:
-    """Возвращает полный config xray или None, если протокол не поддерживаем."""
     scheme = get_scheme(proxy_line)
     try:
         if scheme == "vless":
-            return _config_vless(proxy_line, local_port)
+            return _cfg_vless(proxy_line, local_port)
         if scheme == "vmess":
-            return _config_vmess(proxy_line, local_port)
+            return _cfg_vmess(proxy_line, local_port)
         if scheme == "trojan":
-            return _config_trojan(proxy_line, local_port)
+            return _cfg_trojan(proxy_line, local_port)
         if scheme == "ss":
-            return _config_ss(proxy_line, local_port)
+            return _cfg_ss(proxy_line, local_port)
     except Exception:
         return None
     return None
 
 
-def _base_inbound(local_port: int) -> dict:
-    return {
-        "port": local_port,
-        "listen": "127.0.0.1",
-        "protocol": "socks",
-        "settings": {"udp": True, "auth": "noauth"},
-        "sniffing": {"enabled": True, "destOverride": ["http", "tls"]},
-    }
-
-
-def _config_vless(line: str, local_port: int) -> dict | None:
-    clean = line.split("#", 1)[0]
-    u = urlparse(clean)
-    host = u.hostname
-    port = u.port or 443
-    uuid_ = u.username
+def _cfg_vless(line: str, local_port: int) -> dict | None:
+    u = urlparse(line.split("#", 1)[0])
+    host, port, uuid_ = u.hostname, u.port or 443, u.username
     if not host or not uuid_:
         return None
-
     qs = parse_qs(u.query)
     security = (qs.get("security") or ["none"])[0].lower()
     network = (qs.get("type") or ["tcp"])[0].lower()
@@ -301,34 +263,25 @@ def _config_vless(line: str, local_port: int) -> dict | None:
     fp = (qs.get("fp") or ["chrome"])[0]
     flow = (qs.get("flow") or [""])[0]
     path = (qs.get("path") or ["/"])[0]
-    host_header = (qs.get("host") or [sni])[0]
+    host_h = (qs.get("host") or [sni])[0]
     pbk = (qs.get("pbk") or [""])[0]
     sid = (qs.get("sid") or [""])[0]
-    spx = (qs.get("spx") or [""])[0]
 
     stream: dict = {"network": network}
     if security == "reality":
         stream["security"] = "reality"
         stream["realitySettings"] = {
-            "show": False,
-            "serverName": sni,
-            "fingerprint": fp,
-            "publicKey": pbk,
-            "shortId": sid,
-            "spiderX": spx or "",
+            "serverName": sni, "fingerprint": fp,
+            "publicKey": pbk, "shortId": sid, "spiderX": "",
         }
     elif security in ("tls", "xtls"):
         stream["security"] = "tls"
-        stream["tlsSettings"] = {
-            "serverName": sni,
-            "allowInsecure": True,
-            "fingerprint": fp,
-        }
+        stream["tlsSettings"] = {"serverName": sni, "allowInsecure": True, "fingerprint": fp}
     else:
         stream["security"] = "none"
 
     if network == "ws":
-        stream["wsSettings"] = {"path": path, "headers": {"Host": host_header}}
+        stream["wsSettings"] = {"path": path, "headers": {"Host": host_h}}
     elif network == "grpc":
         stream["grpcSettings"] = {"serviceName": path.lstrip("/")}
 
@@ -341,19 +294,13 @@ def _config_vless(line: str, local_port: int) -> dict | None:
         "inbounds": [_base_inbound(local_port)],
         "outbounds": [{
             "protocol": "vless",
-            "settings": {
-                "vnext": [{
-                    "address": host,
-                    "port": port,
-                    "users": [user],
-                }]
-            },
+            "settings": {"vnext": [{"address": host, "port": port, "users": [user]}]},
             "streamSettings": stream,
         }],
     }
 
 
-def _config_vmess(line: str, local_port: int) -> dict | None:
+def _cfg_vmess(line: str, local_port: int) -> dict | None:
     payload = line.split("://", 1)[1].strip().split("#")[0]
     payload += "=" * ((4 - len(payload) % 4) % 4)
     data = json.loads(base64.b64decode(payload).decode("utf-8", errors="ignore"))
@@ -362,23 +309,20 @@ def _config_vmess(line: str, local_port: int) -> dict | None:
     uuid_ = data.get("id")
     if not host or not uuid_:
         return None
-
     network = (data.get("net") or "tcp").lower()
     tls = (data.get("tls") or "").lower()
     sni = data.get("sni") or data.get("host") or host
     path = data.get("path") or "/"
-    host_header = data.get("host") or sni
-    aid = int(data.get("aid") or data.get("alterId") or 0)
+    host_h = data.get("host") or sni
 
     stream: dict = {"network": network}
-    if tls in ("tls", "reality"):
+    if tls:
         stream["security"] = "tls"
         stream["tlsSettings"] = {"serverName": sni, "allowInsecure": True}
     else:
         stream["security"] = "none"
-
     if network == "ws":
-        stream["wsSettings"] = {"path": path, "headers": {"Host": host_header}}
+        stream["wsSettings"] = {"path": path, "headers": {"Host": host_h}}
     elif network == "grpc":
         stream["grpcSettings"] = {"serviceName": path.lstrip("/")}
 
@@ -387,60 +331,42 @@ def _config_vmess(line: str, local_port: int) -> dict | None:
         "inbounds": [_base_inbound(local_port)],
         "outbounds": [{
             "protocol": "vmess",
-            "settings": {
-                "vnext": [{
-                    "address": host,
-                    "port": port,
-                    "users": [{
-                        "id": uuid_,
-                        "alterId": aid,
-                        "security": data.get("scy") or "auto",
-                    }],
-                }]
-            },
+            "settings": {"vnext": [{
+                "address": host, "port": port,
+                "users": [{"id": uuid_, "alterId": int(data.get("aid") or 0), "security": data.get("scy") or "auto"}],
+            }]},
             "streamSettings": stream,
         }],
     }
 
 
-def _config_trojan(line: str, local_port: int) -> dict | None:
-    clean = line.split("#", 1)[0]
-    u = urlparse(clean)
-    host = u.hostname
-    port = u.port or 443
+def _cfg_trojan(line: str, local_port: int) -> dict | None:
+    u = urlparse(line.split("#", 1)[0])
+    host, port = u.hostname, u.port or 443
     password = unquote(u.username or "")
     if not host or not password:
         return None
-
     qs = parse_qs(u.query)
     sni = (qs.get("sni") or qs.get("peer") or [host])[0]
     network = (qs.get("type") or ["tcp"])[0].lower()
     path = (qs.get("path") or ["/"])[0]
-    host_header = (qs.get("host") or [sni])[0]
+    host_h = (qs.get("host") or [sni])[0]
     fp = (qs.get("fp") or ["chrome"])[0]
     security = (qs.get("security") or ["tls"])[0].lower()
 
     stream: dict = {"network": network}
     if security == "reality":
-        pbk = (qs.get("pbk") or [""])[0]
-        sid = (qs.get("sid") or [""])[0]
         stream["security"] = "reality"
         stream["realitySettings"] = {
-            "serverName": sni,
-            "fingerprint": fp,
-            "publicKey": pbk,
-            "shortId": sid,
+            "serverName": sni, "fingerprint": fp,
+            "publicKey": (qs.get("pbk") or [""])[0],
+            "shortId": (qs.get("sid") or [""])[0],
         }
     else:
         stream["security"] = "tls"
-        stream["tlsSettings"] = {
-            "serverName": sni,
-            "allowInsecure": True,
-            "fingerprint": fp,
-        }
-
+        stream["tlsSettings"] = {"serverName": sni, "allowInsecure": True, "fingerprint": fp}
     if network == "ws":
-        stream["wsSettings"] = {"path": path, "headers": {"Host": host_header}}
+        stream["wsSettings"] = {"path": path, "headers": {"Host": host_h}}
     elif network == "grpc":
         stream["grpcSettings"] = {"serviceName": path.lstrip("/")}
 
@@ -449,38 +375,24 @@ def _config_trojan(line: str, local_port: int) -> dict | None:
         "inbounds": [_base_inbound(local_port)],
         "outbounds": [{
             "protocol": "trojan",
-            "settings": {
-                "servers": [{
-                    "address": host,
-                    "port": port,
-                    "password": password,
-                }]
-            },
+            "settings": {"servers": [{"address": host, "port": port, "password": password}]},
             "streamSettings": stream,
         }],
     }
 
 
-def _config_ss(line: str, local_port: int) -> dict | None:
-    # ss://base64(method:password)@host:port  или ss://method:password@host:port
-    clean = line.split("#", 1)[0]
-    u = urlparse(clean)
-    host = u.hostname
-    port = u.port
+def _cfg_ss(line: str, local_port: int) -> dict | None:
+    u = urlparse(line.split("#", 1)[0])
+    host, port = u.hostname, u.port
     if not host or not port:
         return None
-
     userinfo = u.username or ""
     if u.password:
-        method = unquote(userinfo)
-        password = unquote(u.password)
+        method, password = unquote(userinfo), unquote(u.password)
     else:
         try:
             decoded = b64decode_urlsafe(userinfo).decode("utf-8", errors="ignore")
-            if ":" in decoded:
-                method, password = decoded.split(":", 1)
-            else:
-                return None
+            method, password = decoded.split(":", 1)
         except Exception:
             return None
 
@@ -489,14 +401,9 @@ def _config_ss(line: str, local_port: int) -> dict | None:
         "inbounds": [_base_inbound(local_port)],
         "outbounds": [{
             "protocol": "shadowsocks",
-            "settings": {
-                "servers": [{
-                    "address": host,
-                    "port": port,
-                    "method": method,
-                    "password": password,
-                }]
-            },
+            "settings": {"servers": [{
+                "address": host, "port": port, "method": method, "password": password,
+            }]},
         }],
     }
 
@@ -535,43 +442,32 @@ async def tcp_check(host: str, port: int) -> float | None:
 
 
 def xray_test_sync(proxy_line: str, local_port: int) -> float | None:
-    """Синхронная проверка через xray. Возвращает latency ms или None."""
     cfg = make_xray_config(proxy_line, local_port)
     if not cfg:
         return None
-
     conf_path = None
     proc = None
     try:
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump(cfg, f)
             conf_path = f.name
-
         proc = subprocess.Popen(
             [XRAY_BIN, "run", "-c", conf_path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             preexec_fn=os.setsid,
         )
-        time.sleep(0.35)  # даём xray подняться
-
+        time.sleep(0.4)
         if proc.poll() is not None:
             return None
-
         started = time.monotonic()
-        # проверяем через gstatic
-        curl = subprocess.run(
-            [
-                "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                "--connect-timeout", "4", "--max-time", str(int(XRAY_TIMEOUT)),
-                "-x", f"socks5h://127.0.0.1:{local_port}",
-                "http://www.gstatic.com/generate_204",
-            ],
-            capture_output=True,
-            text=True,
+        r = subprocess.run(
+            ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+             "--connect-timeout", "4", "--max-time", str(int(XRAY_TIMEOUT)),
+             "-x", f"socks5h://127.0.0.1:{local_port}",
+             "http://www.gstatic.com/generate_204"],
+            capture_output=True, text=True,
         )
-        code = (curl.stdout or "").strip()
-        if code == "204":
+        if (r.stdout or "").strip() == "204":
             return (time.monotonic() - started) * 1000
         return None
     except Exception:
@@ -592,59 +488,60 @@ def xray_test_sync(proxy_line: str, local_port: int) -> float | None:
                 pass
 
 
-async def check_one_tcp(proxy_line: str, sem: asyncio.Semaphore) -> dict | None:
+async def check_tcp(proxy_line: str, sem: asyncio.Semaphore) -> dict | None:
     async with sem:
         host, port = extract_host_port(proxy_line)
         if not host or not port:
             return None
-        latency = await tcp_check(host, port)
-        if latency is None:
+        lat = await tcp_check(host, port)
+        if lat is None:
             return None
         ip = await resolve_to_ip(host)
-        country = detect_country(proxy_line)
         scheme = get_scheme(proxy_line)
-        vless_info = parse_vless_params(proxy_line) if scheme == "vless" else {}
+        vinfo = parse_vless_params(proxy_line) if scheme == "vless" else {}
         return {
-            "proxy": format_clean_proxy(proxy_line, country),
             "raw": proxy_line,
             "ip": ip,
-            "country": country,
             "scheme": scheme,
-            "latency_ms": int(latency),
-            "is_reality": vless_info.get("is_reality", False),
-            "sni": vless_info.get("sni", ""),
+            "latency_ms": int(lat),
+            "is_reality": vinfo.get("is_reality", False),
+            "sni": vinfo.get("sni", ""),
             "xray_ok": False,
+            "country": "UNKNOWN",
+            "city": "",
         }
 
 
-async def check_one_xray(item: dict, port_queue: asyncio.Queue) -> dict | None:
-    local_port = await port_queue.get()
+async def check_xray(item: dict, port_q: asyncio.Queue) -> dict | None:
+    port = await port_q.get()
     try:
         loop = asyncio.get_running_loop()
-        latency = await loop.run_in_executor(
-            None, xray_test_sync, item["raw"], local_port
-        )
-        if latency is None:
+        lat = await loop.run_in_executor(None, xray_test_sync, item["raw"], port)
+        if lat is None:
             return None
         item = dict(item)
-        item["latency_ms"] = int(latency)
+        item["latency_ms"] = int(lat)
         item["xray_ok"] = True
-        item["proxy"] = format_clean_proxy(item["raw"], item["country"])
         return item
     finally:
-        await port_queue.put(local_port)
+        await port_q.put(port)
 
 
 # ====================== ФИЛЬТРЫ ======================
-def smart_filter(items: list[dict], max_per_country=MAX_PER_COUNTRY, max_total=MAX_TOTAL, unique_ip=True) -> list[dict]:
+def smart_filter(
+    items: list[dict],
+    max_per_country: int = MAX_PER_COUNTRY,
+    max_total: int = MAX_TOTAL_PER_PROTOCOL,
+    unique_ip: bool = True,
+) -> list[dict]:
     items = sorted(items, key=lambda x: x["latency_ms"])
     seen_ips: set[str] = set()
     country_counts: dict[str, int] = defaultdict(int)
-    result = []
-    for item in items:
-        if len(result) >= max_total:
+    out = []
+    for it in items:
+        if len(out) >= max_total:
             break
-        ip, country = item["ip"], item["country"]
+        ip, country = it["ip"], it.get("country", "UNKNOWN")
         if unique_ip and ip and ip in seen_ips:
             continue
         if country_counts[country] >= max_per_country:
@@ -652,41 +549,41 @@ def smart_filter(items: list[dict], max_per_country=MAX_PER_COUNTRY, max_total=M
         if unique_ip and ip:
             seen_ips.add(ip)
         country_counts[country] += 1
-        result.append(item)
-    return result
+        out.append(it)
+    return out
 
 
 def smart_filter_white(items: list[dict]) -> list[dict]:
-    vless_items = [i for i in items if i["scheme"] == "vless"]
+    vless = [i for i in items if i["scheme"] == "vless"]
 
-    def prio(it: dict):
-        is_reality = 0 if it.get("is_reality") else 1
+    def prio(it):
+        reality = 0 if it.get("is_reality") else 1
         sni = (it.get("sni") or "").lower()
         good = 0 if sni in GOOD_SNI else 1
         ru = 0 if any(x in sni for x in ("vk.com", "yandex", "ya.ru", "mail.ru", "ok.ru", "userapi")) else 1
-        return (is_reality, ru, good, it["latency_ms"])
+        return (reality, ru, good, it["latency_ms"])
 
-    vless_items.sort(key=prio)
-    ip_counts: dict[str, int] = defaultdict(int)
-    country_counts: dict[str, int] = defaultdict(int)
-    result = []
-    for item in vless_items:
-        if len(result) >= WHITE_MAX_TOTAL:
+    vless.sort(key=prio)
+    ip_c: dict[str, int] = defaultdict(int)
+    country_c: dict[str, int] = defaultdict(int)
+    out = []
+    for it in vless:
+        if len(out) >= WHITE_MAX_TOTAL:
             break
-        ip, country = item["ip"], item["country"]
-        if ip_counts[ip] >= WHITE_MAX_PER_IP:
+        ip, country = it["ip"], it.get("country", "UNKNOWN")
+        if ip_c[ip] >= WHITE_MAX_PER_IP:
             continue
-        if country_counts[country] >= WHITE_MAX_PER_COUNTRY:
+        if country_c[country] >= WHITE_MAX_PER_COUNTRY:
             continue
-        ip_counts[ip] += 1
-        country_counts[country] += 1
-        result.append(item)
-    return result
+        ip_c[ip] += 1
+        country_c[country] += 1
+        out.append(it)
+    return out
 
 
 def write_list(path: Path, items: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [i["proxy"] for i in items]
+    lines = [it["proxy"] for it in items]
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
@@ -697,13 +594,13 @@ async def main_async() -> int:
     by_proto.mkdir(exist_ok=True)
 
     print(f"[{datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}] Source: {SOURCE_URL}")
-    print(f"TCP concurrency={CONCURRENCY}, Xray workers={XRAY_WORKERS}")
+    print(f"TCP={CONCURRENCY}, Xray workers={XRAY_WORKERS}, candidates={MAX_XRAY_CANDIDATES}")
 
     # ---- download ----
     try:
         text = await asyncio.to_thread(fetch_url, SOURCE_URL)
     except Exception as e:
-        print(f"Ошибка скачивания: {e}")
+        print(f"Download error: {e}")
         return 1
 
     try:
@@ -712,7 +609,7 @@ async def main_async() -> int:
         decoded = base64.b64decode(cleaned, validate=False).decode("utf-8", errors="ignore")
         if "://" in decoded:
             text = decoded
-            print("Подписка декодирована из base64")
+            print("Base64 subscription decoded")
     except Exception:
         pass
 
@@ -723,87 +620,103 @@ async def main_async() -> int:
         if p and p not in seen:
             seen.add(p)
             configs.append(p)
-    print(f"Уникальных конфигов: {len(configs)}")
+    print(f"Unique configs: {len(configs)}")
     if not configs:
         return 0
 
     # ---- Stage 1: TCP ----
-    print("Стадия 1: TCP проверка...")
+    print("Stage 1: TCP...")
     sem = asyncio.Semaphore(CONCURRENCY)
-    tcp_results = await asyncio.gather(*[check_one_tcp(c, sem) for c in configs])
-    tcp_alive = [r for r in tcp_results if r]
+    tcp_res = await asyncio.gather(*[check_tcp(c, sem) for c in configs])
+    tcp_alive = [r for r in tcp_res if r]
     tcp_alive.sort(key=lambda x: x["latency_ms"])
-    print(f"TCP живых: {len(tcp_alive)}")
+    print(f"TCP alive: {len(tcp_alive)}")
 
-    # берём лучших кандидатов на xray
-    candidates = tcp_alive[:MAX_XRAY_CANDIDATES]
-    print(f"На Xray проверку: {len(candidates)}")
+    # ---- Stage 2: Xray (только поддерживаемые протоколы) ----
+    xray_candidates = [x for x in tcp_alive if x["scheme"] in XRAY_SUPPORTED][:MAX_XRAY_CANDIDATES]
+    print(f"Xray candidates: {len(xray_candidates)}")
 
-    # ---- Stage 2: Xray ----
     xray_ok = []
-    if candidates:
-        # проверяем, есть ли xray
-        try:
-            subprocess.run([XRAY_BIN, "version"], capture_output=True, check=True)
-        except Exception:
-            print("Xray не найден, пропускаем стадию 2")
-            xray_ok = candidates  # fallback — считаем TCP достаточным
-        else:
-            print("Стадия 2: Xray + gstatic...")
-            port_queue: asyncio.Queue = asyncio.Queue()
-            base_port = 11000
-            for i in range(XRAY_WORKERS):
-                await port_queue.put(base_port + i)
+    try:
+        subprocess.run([XRAY_BIN, "version"], capture_output=True, check=True)
+        has_xray = True
+    except Exception:
+        has_xray = False
+        print("Xray not found")
 
-            sem_x = asyncio.Semaphore(XRAY_WORKERS)
+    if has_xray and xray_candidates:
+        print("Stage 2: Xray + gstatic...")
+        port_q: asyncio.Queue = asyncio.Queue()
+        for i in range(XRAY_WORKERS):
+            await port_q.put(11000 + i)
 
-            async def worker(item):
-                async with sem_x:
-                    return await check_one_xray(item, port_queue)
+        sem_x = asyncio.Semaphore(XRAY_WORKERS)
 
-            results = await asyncio.gather(*[worker(it) for it in candidates])
-            xray_ok = [r for r in results if r]
-            print(f"Xray рабочих: {len(xray_ok)}")
+        async def worker(it):
+            async with sem_x:
+                return await check_xray(it, port_q)
 
-    final = xray_ok
+        results = await asyncio.gather(*[worker(it) for it in xray_candidates])
+        xray_ok = [r for r in results if r]
+        print(f"Xray OK: {len(xray_ok)}")
+
+    # Итоговый пул: Xray-OK + TCP для протоколов, которые Xray не умеет (hysteria2 и т.д.)
+    final_map = {id(x): x for x in xray_ok}
+    for item in tcp_alive:
+        if item["scheme"] not in XRAY_SUPPORTED:
+            final_map[id(item)] = item
+    final = list(final_map.values())
     final.sort(key=lambda x: x["latency_ms"])
+    print(f"Final pool (xray + non-xray TCP): {len(final)}")
 
-    # ---- все, кто прошёл Xray (только уникальный IP, без лимитов) ----
+    # ---- GeoIP ----
+    print("GeoIP lookup...")
+    unique_ips = list({it["ip"] for it in final if it["ip"]})
+    geo = await asyncio.to_thread(geo_lookup_batch, unique_ips)
+    for it in final:
+        code, city = geo.get(it["ip"], ("UNKNOWN", ""))
+        it["country"] = code if code in COUNTRY_DATA else "UNKNOWN"
+        it["city"] = city
+        it["proxy"] = format_clean_proxy(it["raw"], it["country"], it["city"])
+
+    # ---- xray_all (все xray, уникальный IP, без лимитов) ----
     seen_ips = set()
-    xray_unique = []
-    for item in final:
-        ip = item["ip"]
-        if ip and ip in seen_ips:
+    xray_all = []
+    for it in sorted(xray_ok, key=lambda x: x["latency_ms"]):
+        if it["ip"] and it["ip"] in seen_ips:
             continue
-        if ip:
-            seen_ips.add(ip)
-        xray_unique.append(item)
+        if it["ip"]:
+            seen_ips.add(it["ip"])
+        # обновить имя после geo
+        it["proxy"] = format_clean_proxy(it["raw"], it.get("country", "UNKNOWN"), it.get("city", ""))
+        xray_all.append(it)
+    write_list(OUT_DIR / "xray_all.txt", xray_all)
+    print(f"xray_all.txt: {len(xray_all)}")
 
-    write_list(OUT_DIR / "xray_all.txt", xray_unique)
-    print(f"Xray all (unique IP): {len(xray_unique)}")
-
-    # ---- обычные фильтрованные списки ----
+    # ---- основной список ----
     main_list = smart_filter(final)
     write_list(OUT_DIR / "all.txt", main_list)
     write_list(OUT_DIR / "working_proxies.txt", main_list)
-    print(f"Основной список: {len(main_list)}")
+    print(f"all.txt: {len(main_list)}")
 
+    # ---- white ----
     white = smart_filter_white(final)
     write_list(OUT_DIR / "white_checked.txt", white)
-    print(f"White list: {len(white)}")
+    print(f"white_checked.txt: {len(white)}")
 
+    # ---- по протоколам (до 550 каждый) ----
     by_scheme: dict[str, list] = defaultdict(list)
     for it in final:
         by_scheme[it["scheme"]].append(it)
 
     for scheme, items in by_scheme.items():
-        filtered = smart_filter(items)
+        filtered = smart_filter(items, max_total=MAX_TOTAL_PER_PROTOCOL)
         write_list(by_proto / f"{scheme}.txt", filtered)
         write_list(OUT_DIR / f"{scheme}.txt", filtered)
         if filtered:
             print(f"  {scheme}.txt → {len(filtered)}")
 
-    print("Готово.")
+    print("Done.")
     return 0
 
 
