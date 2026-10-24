@@ -27,18 +27,24 @@ CONCURRENCY = int(os.getenv("CONCURRENCY", "150"))
 XRAY_WORKERS = int(os.getenv("XRAY_WORKERS", "6"))
 SB_WORKERS = int(os.getenv("SB_WORKERS", "6"))
 XRAY_TIMEOUT = float(os.getenv("XRAY_TIMEOUT", "9"))
-CORE_RATIO = float(os.getenv("CORE_RATIO", "0.85"))
+CORE_RATIO = float(os.getenv("CORE_RATIO", "0.90"))
 
 OUT_DIR = Path(os.getenv("OUT_DIR", "results"))
 
 MAX_PER_COUNTRY = 30
 MAX_TOTAL_PER_PROTOCOL = 400
+MAX_TOTAL_HYSTERIA2 = 500
 MAX_TOTAL_ALL = 650
 WHITE_MAX_PER_IP = 3
 WHITE_MAX_PER_COUNTRY = 25
 WHITE_MAX_TOTAL = 400
 RU_MAX_PER_IP = 2
 RU_MAX_TOTAL = 250
+
+# http/https не поддерживаются v2rayNG — не в общие файлы
+EXCLUDE_FROM_GENERAL = {"http", "https"}
+# ss/socks режем до \~20% мест
+LOW_PRIORITY_SCHEMES = {"ss", "socks5", "socks"}
 
 XRAY_BIN = os.getenv("XRAY_BIN", "xray")
 SINGBOX_BIN = os.getenv("SINGBOX_BIN", "sing-box")
@@ -231,7 +237,7 @@ def base_link(proxy_line: str) -> str:
     return proxy_line.split("#", 1)[0].strip()
 
 
-# ====================== XRAY CONFIGS ======================
+# ====================== XRAY ======================
 def _xray_inbound(port: int) -> dict:
     return {
         "port": port, "listen": "127.0.0.1", "protocol": "socks",
@@ -403,7 +409,7 @@ def _xray_ss(line: str, port: int) -> dict | None:
     }
 
 
-# ====================== SING-BOX CONFIGS ======================
+# ====================== SING-BOX ======================
 def make_singbox_config(proxy_line: str, local_port: int) -> dict | None:
     scheme = get_scheme(proxy_line)
     try:
@@ -688,22 +694,42 @@ def smart_filter(
     max_per_country=MAX_PER_COUNTRY,
     max_total=MAX_TOTAL_PER_PROTOCOL,
     unique_ip=True,
-    deprioritize_ss=False,
+    general=False,
 ):
+    """
+    general=True → общие файлы (all, working, xray_all, russia):
+      - без http/https
+      - ss/socks ≤ 20%
+      - hysteria2 в приоритете
+    Сортировка всегда по скорости (после приоритета протокола).
+    """
     def sort_key(x):
-        ss_penalty = 1 if (deprioritize_ss and x.get("scheme") == "ss") else 0
-        return (ss_penalty, x["latency_ms"])
+        scheme = x.get("scheme", "")
+        if scheme == "hysteria2":
+            prio = 0
+        elif scheme in LOW_PRIORITY_SCHEMES:
+            prio = 2
+        else:
+            prio = 1
+        return (prio, x["latency_ms"])
 
     items = sorted(items, key=sort_key)
     seen_ips: set[str] = set()
     seen_hostports: set[str] = set()
     seen_links: set[str] = set()
     country_counts: dict[str, int] = defaultdict(int)
+    low_prio_count = 0
+    max_low_prio = max(1, int(max_total * 0.20))
     out = []
 
     for it in items:
         if len(out) >= max_total:
             break
+
+        scheme = it.get("scheme", "")
+        if general and scheme in EXCLUDE_FROM_GENERAL:
+            continue
+
         ip = (it.get("ip") or "").strip()
         country = it.get("country", "UNKNOWN")
         raw = it.get("raw") or it.get("proxy") or ""
@@ -719,6 +745,11 @@ def smart_filter(
         if country_counts[country] >= max_per_country:
             continue
 
+        if general and scheme in LOW_PRIORITY_SCHEMES:
+            if low_prio_count >= max_low_prio:
+                continue
+            low_prio_count += 1
+
         if unique_ip and ip:
             seen_ips.add(ip)
         if hp:
@@ -727,6 +758,7 @@ def smart_filter(
             seen_links.add(base)
         country_counts[country] += 1
         out.append(it)
+
     return out
 
 
@@ -770,6 +802,7 @@ def smart_filter_white(items):
 
 def smart_filter_russia(items):
     ru = [i for i in items if i.get("country") == "RU"]
+    ru = [i for i in ru if i.get("scheme") not in EXCLUDE_FROM_GENERAL]
     ru.sort(key=lambda x: x["latency_ms"])
     ip_c, seen_hp, seen_links, out = defaultdict(int), set(), set(), []
     for it in ru:
@@ -806,6 +839,7 @@ async def main_async() -> int:
     by_proto.mkdir(exist_ok=True)
 
     print(f"[{datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}] Source: {SOURCE_URL}")
+    print(f"CORE_RATIO={CORE_RATIO}")
 
     try:
         text = await asyncio.to_thread(fetch_url, SOURCE_URL)
@@ -842,7 +876,7 @@ async def main_async() -> int:
     core_pool = [x for x in tcp_alive if x["scheme"] in CORE_SUPPORTED]
     take = max(1, int(len(core_pool) * CORE_RATIO))
     candidates = core_pool[:take]
-    print(f"Core candidates ({int(CORE_RATIO*100)}%): {len(candidates)}")
+    print(f"Core candidates ({int(CORE_RATIO * 100)}%): {len(candidates)}")
 
     has_xray = subprocess.run([XRAY_BIN, "version"], capture_output=True).returncode == 0
     has_sb = subprocess.run([SINGBOX_BIN, "version"], capture_output=True).returncode == 0
@@ -896,30 +930,12 @@ async def main_async() -> int:
         it["city"] = city
         it["proxy"] = format_clean_proxy(it["raw"], it["country"], it["city"])
 
-    # core_all / xray_all
-    seen_ips, seen_hp, seen_links, core_all = set(), set(), set(), []
-    for it in sorted(core_ok, key=lambda x: x["latency_ms"]):
-        ip = (it.get("ip") or "").strip()
-        raw = it.get("raw") or ""
-        hp, base = host_port_key(raw), base_link(raw)
-        if ip and ip in seen_ips:
-            continue
-        if hp and hp in seen_hp:
-            continue
-        if base and base in seen_links:
-            continue
-        if ip:
-            seen_ips.add(ip)
-        if hp:
-            seen_hp.add(hp)
-        if base:
-            seen_links.add(base)
-        it["proxy"] = format_clean_proxy(raw, it.get("country", "UNKNOWN"), it.get("city", ""))
-        core_all.append(it)
+    # xray_all — прошедшие core, без http/https, дедуп, ss режем
+    core_all = smart_filter(core_ok, max_total=MAX_TOTAL_ALL, general=True)
     write_list(OUT_DIR / "xray_all.txt", core_all)
     print(f"xray_all.txt: {len(core_all)}")
 
-    main_list = smart_filter(final, max_total=MAX_TOTAL_ALL, deprioritize_ss=True)
+    main_list = smart_filter(final, max_total=MAX_TOTAL_ALL, general=True)
     write_list(OUT_DIR / "all.txt", main_list)
     write_list(OUT_DIR / "working_proxies.txt", main_list)
     print(f"all.txt: {len(main_list)}")
@@ -935,8 +951,10 @@ async def main_async() -> int:
     by_scheme: dict[str, list] = defaultdict(list)
     for it in final:
         by_scheme[it["scheme"]].append(it)
+
     for scheme, items in by_scheme.items():
-        filtered = smart_filter(items, max_total=MAX_TOTAL_PER_PROTOCOL)
+        limit = MAX_TOTAL_HYSTERIA2 if scheme == "hysteria2" else MAX_TOTAL_PER_PROTOCOL
+        filtered = smart_filter(items, max_total=limit, general=False)
         write_list(by_proto / f"{scheme}.txt", filtered)
         write_list(OUT_DIR / f"{scheme}.txt", filtered)
         if filtered:
@@ -951,4 +969,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main()) 
