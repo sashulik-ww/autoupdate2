@@ -1,9 +1,9 @@
-hysteria2://4291c983-c520-46ac-82cc-48f14bef573f@129.213.91.185:35013?insecure=1&sni=www.bing.com#%F0%9F%87%BA%F0%9F%87%B8%20United%20States%2C%20Ashburn
-hysteria2://gf1%3Agfhysteria2024@66.94.121.46:443?insecure=1&sni=www.broadcom.com#%F0%9F%87%BA%F0%9F%87%B8%20United%20States%2C%20Seattle
-hysteria2://https%3A%2F%2Fxship.best@starlink-ft.251313.xyz:443?insecure=1&sni=xship.top#%F0%9F%87%BA%F0%9F%87%B8%20United%20States%2C%20San%20Jose
-hysteria2://dongtaiwang.com@62.210.124.146:22000?insecure=1&sni=www.microsoft.com#%F0%9F%87%AB%F0%9F%87%B7%20France%2C%20Paris
-hysteria2://usqmqUKJFIlCmvkCNSY64L3k@8.209.247.109:443/?insecure=1&sni=bing.com#%F0%9F%87%AF%F0%9F%87%B5%20Japan%2C%20Tokyo
+hysteria2://4291c983-c520-46ac-82cc-48f14bef573f@129.213.91.185:35013?insecure=1&sni=129.213.91.185#%F0%9F%87%BA%F0%9F%87%B8%20United%20States%2C%20Ashburn
 hysteria2://dQPT5I2ojYNjBeT2KPvk3Lr@130.94.16.109:443?insecure=1&sni=www.microsoft.com#%F0%9F%87%BA%F0%9F%87%B8%20United%20States%2C%20Washington
-hysteria2://gf1%3Agfhysteria2024@5.129.235.85:443/?insecure=1&sni=vk.com#%F0%9F%87%B3%F0%9F%87%B1%20Netherlands%2C%20Amsterdam
+hysteria2://gf1%3Agfhysteria2024@66.94.121.46:443?insecure=1&sni=66.94.121.46#%F0%9F%87%BA%F0%9F%87%B8%20United%20States%2C%20Seattle
+hysteria2://dongtaiwang.com@62.210.124.146:22000?insecure=1&sni=www.microsoft.com#%F0%9F%87%AB%F0%9F%87%B7%20France%2C%20Paris
+hysteria2://gf1%3Agfhysteria2024@5.129.235.85:443?insecure=1&sni=google.com#%F0%9F%87%B3%F0%9F%87%B1%20Netherlands%2C%20Amsterdam
 hysteria2://gf1%3Agfhysteria2024@173.212.201.85:443?insecure=1&sni=www.docker.com#%F0%9F%87%AB%F0%9F%87%B7%20France%2C%20Lauterbourg
-hysteria2://gf1%3Agfhysteria2024@185.156.44.99:443?insecure=1&sni=whatsapp.com#%F0%9F%87%B7%F0%9F%87%B4%20Romania%2C%20Bucharest
+hysteria2://gf1%3Agfhysteria2024@185.156.44.99:443?insecure=1&sni=www.amazon.com#%F0%9F%87%B7%F0%9F%87%B4%20Romania%2C%20Bucharest
+hysteria2://usqmqUKJFIlCmvkCNSY64L3k@8.209.247.109:443?security=tls&sni=8.209.247.109&alpn=h3&insecure=1#%F0%9F%87%AF%F0%9F%87%B5%20Japan%2C%20Tokyo
+hysteria2://https%3A%2F%2Fxship.2fa.cat@starlink-ft.251313.xyz:443?insecure=1&security=tls&sni=xship.top#%F0%9F%87%BA%F0%9F%87%B8%20United%20States%2C%20San%20Jose
