@@ -1,7 +1,7 @@
 hysteria2://8dOHZ13sx33R1%2FPQbhTK%2Fw%3D%3D@34.24.25.1:443?sni=bing.com&insecure=1#%F0%9F%87%BA%F0%9F%87%B8%20United%20States%2C%20North%20Charleston
-hysteria2://gf1%3Agfhysteria2024@66.94.121.46:443?insecure=1&sni=66.94.121.46#%F0%9F%87%BA%F0%9F%87%B8%20United%20States%2C%20Seattle
-hysteria2://usqmqUKJFIlCmvkCNSY64L3k@8.209.247.109:443?insecure=1#%F0%9F%87%AF%F0%9F%87%B5%20Japan%2C%20Tokyo
 hysteria2://dongtaiwang.com@62.210.124.146:22000?insecure=1&sni=www.microsoft.com#%F0%9F%87%AB%F0%9F%87%B7%20France%2C%20Paris
+hysteria2://gf1%3Agfhysteria2024@66.94.121.46:443?insecure=1&sni=66.94.121.46#%F0%9F%87%BA%F0%9F%87%B8%20United%20States%2C%20Seattle
 hysteria2://a2c74ce7-5daa-4bee-a1eb-52863873b3c3@194.48.250.233:443?insecure=1&sni=mol.ultimagamest.com&obfs=&obfs-password=#%F0%9F%87%A9%F0%9F%87%AA%20Germany%2C%20Frankfurt%20am%20Main
-hy2://gf1%3Agfhysteria2024@185.156.44.99:443?insecure=1&sni=google.com#%F0%9F%87%B7%F0%9F%87%B4%20Romania%2C%20Bucharest
+hysteria2://usqmqUKJFIlCmvkCNSY64L3k@8.209.247.109:443?security=tls&sni=bing.com&alpn=h3&insecure=1#%F0%9F%87%AF%F0%9F%87%B5%20Japan%2C%20Tokyo
+hysteria2://gf1%3Agfhysteria2024@185.156.44.99:443?allowInsecure=1&sni=css.rbxcdn.com&upmbps=10&insecure=1&type=tcp&downmbps=50&nonce=e98RZ2Wn&_t=227da4f0#%F0%9F%87%B7%F0%9F%87%B4%20Romania%2C%20Bucharest
 hysteria2://769f34f0-1500-488f-b414-03bc90666502@95.143.196.97:443?sni=se.mimowhat.online&insecure=1#%F0%9F%87%B8%F0%9F%87%AA%20Sweden%2C%20Hudiksvall
